@@ -88,7 +88,6 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
                 # "compressed_tokens": compressed_tokens,
                 "masked_words": masked_words,
                 "self_info": self_info,
-                "compress_ratio": round(len(compressed_text) / len(item['content']), 6)
                 # "masked_tokens": masked_tokens
             }
             results.append(sample)
@@ -97,5 +96,3 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
         json.dump(results, f, ensure_ascii=False, indent=4)  
     
     print(f"Processing complete, compressed data has been saved to {output_file}")
-
-    

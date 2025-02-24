@@ -10,7 +10,7 @@ def get_prefix(instruction, model_name):
     if "Qwen" in model_name:
         return f"""### Instruction: {instruction} \n### Input: """
     elif "vicuna" in model_name:
-        return f"""SYSTEM: {instruction}\nUSER: """
+        return f"""SYSTEM: {instruction} \nUSER: """
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
     
@@ -22,6 +22,7 @@ class LLMzip_encode:
         self.pad_id = 0
         self.bos_id = 1
         self.eos_id = 2
+        self.lack_token = np.array(tokenizer.encode(" []"))
         
     def _gen_rank(self, probs, next_token):
         probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True, stable=True)
@@ -33,7 +34,7 @@ class LLMzip_encode:
         array_used = array.reshape(-1)
         str_out = str()
         for i in range(array_used.size):
-            str_out += str(array_used[i])+ " "
+            str_out += (str(array_used[i]) if array_used[i] != -1 else ' ') + ' '
         return str_out
     
     def _encoder_str2bin(self, string_data):
@@ -77,7 +78,7 @@ class LLMzip_encode:
     
     def encode_from_tokens(self,
                           win_size: int,
-                          tokens_full: Optional[np.ndarray] = None,
+                          text_tokens: Optional[np.ndarray] = None,
                           with_context_start: bool = False,
                           context_start: Optional[np.ndarray] = None,
                           is_expand: bool = True,
@@ -89,7 +90,7 @@ class LLMzip_encode:
         start_pos = 1
         
         if with_context_start:
-            tokens_full = np.concatenate([context_start, tokens_full])
+            tokens_full = np.concatenate([context_start, text_tokens])
             start_pos = len(context_start)
         
         tokens_in = np.array([tokens_full[ :win_size].tolist()])
@@ -111,10 +112,14 @@ class LLMzip_encode:
           
         if with_context_start:
             ranks_list = ranks_list[start_pos:]
-            probs_list = probs_list[start_pos:]
+            # probs_list = probs_list[start_pos:]
+        
+        lack_position = np.where(text_tokens == self.lack_token[0])[0]
+        for pos in lack_position:
+            ranks_list[pos] = -1
             
         ranks_full = np.concatenate(ranks_list, 0).squeeze()
-        probs_full = np.concatenate(probs_list, 0).squeeze() 
+        # probs_full = np.concatenate(probs_list, 0).squeeze()
 
         str_ranks = self._get_str_array(ranks_full)
         ranks_code = self._encoder_str2bin(str_ranks)
@@ -130,6 +135,7 @@ class LLMzip_decode:
         self.eos_id = 2
         self.start_token = self.pad_id
         self.vocab = tokenizer.get_vocab()
+        self.lack_token = torch.tensor(tokenizer.encode(" []")).long().cuda()
         
     def _decoder_bin2str(self, binary_string):
         decoding_map = {
@@ -170,7 +176,7 @@ class LLMzip_decode:
                      context_start: Optional[np.ndarray] = None,
                      is_expand: bool=True,
                      expand_factor: int=100):
-        str_ranks = self._decoder_bin2str(ranks_code)
+        str_ranks = self._decoder_bin2str(ranks_code).replace('   ', ' -1 ')
         ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
         
         batch_size = 1  
@@ -195,6 +201,10 @@ class LLMzip_decode:
         tokens = tokens.cuda()
         
         for cur_pos in range(start_pos, total_length):
+            if ranks[:, cur_pos] == -1:
+                tokens[:, cur_pos] = self.lack_token[0]
+                continue
+            
             logits = self.model.forward(tokens[:, :cur_pos])['logits'][0][-1]
             if is_expand:
                 logits = logits * expand_factor
@@ -223,7 +233,7 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
     for data in tqdm(sampled_data, desc="Processing samples"):
         # Generate restored text
         start_time = time.time()
-        text_tokens = np.array(tokenizer.encode(data["compressed_text"]))
+        text_tokens = np.array(tokenizer.encode(data["compressed_text"].replace("[LACK]", "[]")))
         ranks_str, ranks_code = compress_encoder.encode_from_tokens(
             win_size=test_setting["win_size"],
             tokens_full=text_tokens,
@@ -264,7 +274,7 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
             with_context_start=test_setting["prefix"],
             context_start=prefix_tokens,
             is_expand=True
-        )
+        ).replace("[]", "[LACK]")
         end_time = time.time()
         
         data["decoded_text"] = decoded_text
@@ -274,3 +284,5 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(sampled_data, f, ensure_ascii=False, indent=4)
+
+    

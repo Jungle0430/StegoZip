@@ -1,0 +1,11 @@
+# ignore all files in the checkpoint folder
+checkpoint/
+
+# ignore all files in the data folder
+data/
+
+# ignore all files in the result folder
+result/
+
+# ignore main_result.txt
+main_result.txt

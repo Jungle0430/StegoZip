@@ -8,7 +8,7 @@ def generate_prompt_qwen(instruction, input, output, end_marker="[END]"):
     return f"""### Instruction: {instruction} \n### Input: {input} \n### Response: {output}{end_marker}"""
 
 def generate_prompt_vicuna(instruction, input, output, end_marker="[END]"):
-    return f"""SYSTEM: {instruction}\nUSER: {input}\nASSISTANT: {output}{end_marker}"""
+    return f"""SYSTEM: {instruction} \nUSER: {input} \nASSISTANT: {output}{end_marker}"""
 
 def clean_text(text):
     """Clean whitespace and newlines in text"""

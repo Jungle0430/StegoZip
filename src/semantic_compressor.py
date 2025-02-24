@@ -1,5 +1,6 @@
 import re
 import torch
+import spacy
 import numpy as np
 from typing import List, Tuple
 
@@ -20,6 +21,7 @@ class SemanticCompressor:
         self.eta = eta
         self.ave_info = ave_info
         self.model.eval()
+        self.nlp = spacy.load("en_core_web_md")
 
     def _calculate_self_information(self, text: str) -> Tuple[List[int], List[float]]:
         """
@@ -111,11 +113,18 @@ class SemanticCompressor:
         token_ids, token_self_info = self._calculate_self_information(text)
         if use_unit_info:
             words, word_self_info = self._map_self_info_to_words(text, token_ids, token_self_info)
-            
+                
             if self.ave_info != 0:
                 reduce_ratio = reduce_ratio * (1 - self.eta * (self.info - self.ave_info) / self.ave_info)
                 reduce_ratio = max(0, min(1, reduce_ratio))
-            
+                
+            doc = self.nlp(text)
+            entities = list(doc.ents)
+            entity_texts = set()
+            for ent in entities:
+                cleaned_ent = re.sub(r'^[\W_]+|[\W_]+$', '', ent.text.strip())
+                entity_texts.add(cleaned_ent)
+                
             # Calculate the threshold based on reduce_ratio
             if word_self_info:
                 threshold = np.nanpercentile(word_self_info, reduce_ratio * 100)
@@ -126,9 +135,14 @@ class SemanticCompressor:
             compressed_words = []
             masked_words = []
             for word, info in zip(words, word_self_info):
+                cleaned_word = re.sub(r'^[\W_]+|[\W_]+$', '', word.strip())
+                if cleaned_word in entity_texts:
+                    info = np.inf
+                
                 if info >= threshold:
                     compressed_words.append(word)
                 else:
+                    compressed_words.append(' [LACK]')
                     masked_words.append(word)
             
             compressed_text = ''.join(compressed_words)
@@ -150,3 +164,16 @@ class SemanticCompressor:
             
             return np.array(compressed_tokens), np.array(masked_tokens), self.info
         
+if __name__ == "__main__":
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    model_name = "Qwen/Qwen2.5-7B"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    compressor = SemanticCompressor(model, tokenizer, device)
+    test_text = "$17, 155Friday, 166, Tuesday. The quick brown fox jumps over the lazy dog."
+    
+    compressed_text, masked_words, info = compressor.compress_text(test_text, reduce_ratio=0.3, use_unit_info=True)
+    print(f"Compressed text: {compressed_text}")

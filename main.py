@@ -33,7 +33,7 @@ def main():
     parser.add_argument("--use_unit_info", type=bool, default=True)
 
     parser.add_argument("--instruction", type=str,
-                        default="You are a text restoration expert. Insert missing words into the input text to reconstruct the original without deleting or modifying existing content.")
+                        default="You are a text restoration expert. Insert missing words indicated by [LACK] into the input text to reconstruct the original without deleting or modifying existing content.")
     parser.add_argument("--end_marker", type=str, default="[END]")
     parser.add_argument("--val_ratio", type=float, default=0.2)
     parser.add_argument("--cutoff_len", type=int, default=512)
@@ -63,11 +63,8 @@ def main():
     setup_seed(args.seed)
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    lora_path = f"checkpoint/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}"
+    lora_path = f"checkpoint/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}"
     print(f"LoRA model path: {lora_path}")
-    
-    dataset_path = f"data/origin/{args.dataset}_{args.mode}.jsonl"
-    download_dataset(args.dataset, args.mode, output_file=dataset_path)
     
     if args.mode == 'train':
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -112,7 +109,7 @@ def main():
         else:
             raise FileNotFoundError(f"LoRA model {lora_path} does not exist!")
         
-        train_compressed_dataset_path = f"data/compress/{args.model_name.split("/")[0]}_{args.dataset}_train_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        train_compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_train_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
         if os.path.exists(train_compressed_dataset_path):
             with open(train_compressed_dataset_path, "r") as f:
                 train_data = json.load(f)
@@ -133,7 +130,10 @@ def main():
     
     # DSRP
     if args.mode == 'train' or args.mode == 'test':
-        compressed_dataset_path = f"data/compress/{args.model_name.split("/")[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        dataset_path = f"data/origin/{args.dataset}_{args.mode}.jsonl"
+        download_dataset(args.dataset, args.mode, output_file=dataset_path)
+    
+        compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
         create_compressed_data(model,
                             tokenizer,
                             device,
@@ -154,7 +154,7 @@ def main():
         with open(compressed_dataset_path, "r") as f:
             test_dataset = json.load(f)
         
-        results_file = f"result/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
         
         # ICC
         token2binary(model, tokenizer, test_dataset, test_settings, results_file)
@@ -164,12 +164,12 @@ def main():
         restore_message(model, tokenizer, test_dataset, test_settings, results_file)
         
     elif args.mode == 'stego':
-        stego_dataset_path = f"data/origin/{args.stego_dataset}_{args.mode}.jsonl"
-        download_dataset(args.dataset, args.mode, output_file=dataset_path)
+        stego_dataset_path = f"data/origin/{args.stego_dataset}_train.jsonl"
+        download_dataset(args.dataset, 'train', output_file=dataset_path)
         with open(stego_dataset_path, "r") as f:
             stego_dataset = json.load(f) 
         
-        results_file = f"result/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
         with open(results_file, "r") as f:
             test_dataset = json.load(f)
             
@@ -182,7 +182,7 @@ def main():
             length = len(sentences)
             stego_prompt.append('. '.join(sentences[:2]) if length > 2 else text)
         
-        stego_file = f"result/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_stego.json"
+        stego_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_stego.json"
         if args.stego_algo == 'Discop':
             discop_stego(test_dataset, stego_prompt, args.seed, stego_file)
         else:
@@ -190,8 +190,8 @@ def main():
             raise ValueError(f"Invalid stego algorithm: {args.stego_algo}")     
         
     elif args.mode == 'eval':
-        stego_file = f"result/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_stego.json"
-        eval_file = f"result/{args.model_name.split("/")[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_eval.json"
+        stego_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_stego.json"
+        eval_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}_eval.json"
         evaluation(stego_file, eval_file)
         
     else:
