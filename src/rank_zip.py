@@ -116,8 +116,8 @@ class LLMzip_encode:
         
         lack_position = np.where(text_tokens == self.lack_token[0])[0]
         for pos in lack_position:
-            ranks_list[pos] = -1
-            
+            ranks_list[pos] = np.array([-1])
+        
         ranks_full = np.concatenate(ranks_list, 0).squeeze()
         # probs_full = np.concatenate(probs_list, 0).squeeze()
 
@@ -236,7 +236,7 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
         text_tokens = np.array(tokenizer.encode(data["compressed_text"].replace("[LACK]", "[]")))
         ranks_str, ranks_code = compress_encoder.encode_from_tokens(
             win_size=test_setting["win_size"],
-            tokens_full=text_tokens,
+            text_tokens=text_tokens,
             with_context_start=test_setting["prefix"],
             context_start=prefix_tokens,
             is_expand = True

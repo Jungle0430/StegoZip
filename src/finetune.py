@@ -54,7 +54,7 @@ def finetune_model(base_model,
                    output_dir,
                    train_settings):
     if os.path.exists(output_dir):
-        raise FileExistsError(f"Output directory {output_dir} already exists!")
+        raise FileExistsError(f"Output directory {output_dir} already exists! \nIf you want to refinetune the model, please delete the directory first!")
     
     """Fine-tune a language model on text restoration task"""
     lora_config = LoraConfig(
