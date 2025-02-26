@@ -165,7 +165,7 @@ def main():
         
     elif args.mode == 'stego':
         stego_dataset_path = f"data/origin/{args.stego_dataset}_train.jsonl"
-        download_dataset(args.dataset, 'train', output_file=dataset_path)
+        download_dataset(args.stego_dataset, 'train', output_file=stego_dataset_path)
         with open(stego_dataset_path, "r") as f:
             stego_dataset = json.load(f) 
         

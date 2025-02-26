@@ -34,7 +34,7 @@ class LLMzip_encode:
         array_used = array.reshape(-1)
         str_out = str()
         for i in range(array_used.size):
-            str_out += (str(array_used[i]) if array_used[i] != -1 else ' ') + ' '
+            str_out += (str(array_used[i]) if array_used[i] != -1 else '') + ' '
         return str_out
     
     def _encoder_str2bin(self, string_data):
@@ -87,12 +87,14 @@ class LLMzip_encode:
     ) -> np.ndarray:
         ranks_list = []
         probs_list = []
-        start_pos = 1
         
         if with_context_start:
             tokens_full = np.concatenate([context_start, text_tokens])
             start_pos = len(context_start)
-        
+        else:
+            tokens_full = text_tokens
+            start_pos = 1
+            
         tokens_in = np.array([tokens_full[ :win_size].tolist()])
         tokens_in = np.insert(tokens_in, 0, 0, axis=1)
         ranks, probs = self._encode_batch(tokens_in, 1, is_expand=is_expand, expand_factor=expand_factor)
@@ -113,7 +115,7 @@ class LLMzip_encode:
         if with_context_start:
             ranks_list = ranks_list[start_pos:]
             # probs_list = probs_list[start_pos:]
-        
+
         lack_position = np.where(text_tokens == self.lack_token[0])[0]
         for pos in lack_position:
             ranks_list[pos] = np.array([-1])
@@ -146,20 +148,27 @@ class LLMzip_decode:
         
         temp = ''
         binary_data = ''
+        flag = False
         for i in range(len(binary_string)):
             if binary_string[i] == 'x':
                 break
             temp += binary_string[i]
             if temp == '11':
-                binary_data += ' '
+                if flag:
+                    binary_data += '-1 '
+                else:
+                    flag = True
+                    binary_data += ' '
                 temp = ''
             elif temp == '101':
                 binary_data += '0'
+                flag = False
                 temp = ''
             elif len(temp) == 4:
                 if temp == '0000':
                     break
                 binary_data += decoding_map[temp]
+                flag = False
                 temp = ''
 
         return binary_data
@@ -176,7 +185,7 @@ class LLMzip_decode:
                      context_start: Optional[np.ndarray] = None,
                      is_expand: bool=True,
                      expand_factor: int=100):
-        str_ranks = self._decoder_bin2str(ranks_code).replace('   ', ' -1 ')
+        str_ranks = self._decoder_bin2str(ranks_code)
         ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
         
         batch_size = 1  
@@ -188,6 +197,8 @@ class LLMzip_decode:
             ranks_in = np.append(np.zeros(len(context_start), dtype=np.int64), ranks_in)
             ranks = torch.tensor(ranks_in).reshape(batch_size,-1).cuda()
         else:
+            total_length += 1
+            ranks_in = np.append(np.zeros(1, dtype=np.int64), ranks_in)
             ranks = torch.tensor(ranks_in).reshape(batch_size, -1).cuda()
 
         tokens = torch.full((batch_size, total_length), self.pad_id).long()
@@ -212,8 +223,8 @@ class LLMzip_decode:
             probs = torch.softmax(logits, dim=-1)
             next_token = self._gen_next_token(probs, ranks[:, cur_pos])
             tokens[:, cur_pos] = next_token.clone().detach().long()
-            
-        decoded_text = self.tokenizer.decode(tokens.tolist()[0][1:][len(context_start)-1:])
+        
+        decoded_text = self.tokenizer.decode(tokens.tolist()[0][1:][start_pos-1:])
         
         return decoded_text
     
@@ -285,4 +296,34 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(sampled_data, f, ensure_ascii=False, indent=4)
 
+if __name__ == "__main__":
+    from transformers import AutoTokenizer, AutoModelForCausalLM
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B", torch_dtype=torch.float32).to(device)
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B")
+    
+    compress_encoder = LLMzip_encode(model, tokenizer)
+    compress_decoder = LLMzip_decode(model, tokenizer)
+    
+    test_text = "Nikkei [LACK] regains 11,000 level TOKYO - Japan #39;s benchmark Nikkei stock index [LACK] recovered [LACK] [LACK] 11,000 [LACK] Monday morning [LACK] widespread [LACK] prompted by advances in US shares last Friday."
+    test_tokens = np.array(tokenizer.encode(test_text.replace("[LACK]", "[]")))
+    print(f"test tokens: {test_tokens}")
+    ranks_str, ranks_code = compress_encoder.encode_from_tokens(
+        win_size=512,
+        text_tokens=test_tokens,
+        with_context_start=False,
+        context_start=None,
+        is_expand=True
+    )
+    print(f"Ranks string: {ranks_str}")
+    print(f"Ranks code: {ranks_code}")
+    
+    decoded_text = compress_decoder.decode_ranks(
+        win_size=512,
+        ranks_code=ranks_code,
+        with_context_start=False,
+        context_start=None,
+        is_expand=True
+    )
+    print(f'dencoded text: {decoded_text.replace("[]", "[LACK]")}')
