@@ -244,7 +244,7 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
     for data in tqdm(sampled_data, desc="Processing samples"):
         # Generate restored text
         start_time = time.time()
-        text_tokens = np.array(tokenizer.encode(data["compressed_text"].replace("[LACK]", "[]")))
+        text_tokens = np.array(tokenizer.encode(data["compressed_text"]))
         ranks_str, ranks_code = compress_encoder.encode_from_tokens(
             win_size=test_setting["win_size"],
             text_tokens=text_tokens,
@@ -254,9 +254,9 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
         )
         end_time = time.time()
         
-        data["ranks_str"] = ranks_str
-        data["ranks_code"] = ranks_code
-        data["encode_time_cost"] = round(end_time - start_time, 6)
+        data[f"ranks_str_{test_setting['use_lora']}"] = ranks_str
+        data[f"ranks_code_{test_setting['use_lora']}"] = ranks_code
+        data[f"encode_time_cost"] = round(end_time - start_time, 6)
     
     print(f"=================== Index Encoding Complete ===================")
     
@@ -272,7 +272,7 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
     prefix_tokens = np.array(tokenizer.encode(prefix))
     
     sample_size = min(test_setting["test_size"], len(test_data))
-    print(f"Encoding {sample_size} samples")
+    print(f"Decoding {sample_size} samples")
     sampled_data = random.sample(test_data, sample_size)
     
     # Process samples
@@ -281,20 +281,102 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
         start_time = time.time()
         decoded_text = compress_decoder.decode_ranks(
             win_size=test_setting["win_size"],
-            ranks_code=data["ranks_code"],
+            ranks_code=data["ranks_code_True"],
             with_context_start=test_setting["prefix"],
             context_start=prefix_tokens,
             is_expand=True
-        ).replace("[]", "[LACK]")
+        )
         end_time = time.time()
         
-        data["decoded_text"] = decoded_text
-        data["decode_time_cost"] = round(end_time - start_time, 6)
+        data[f"decoded_text_{test_setting['use_lora']}"] = decoded_text
+        data[f"decode_time_cost"] = round(end_time - start_time, 6)
     
     print(f"=================== Index Decoding Complete ===================")
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(sampled_data, f, ensure_ascii=False, indent=4)
+        
+def huffman_zip(test_data, output_file):
+    from argparse import Namespace
+    import heapq
+    import random
+
+    class Node:
+        def __init__(self, char=None, freq=0, left=None, right=None):
+            self.char = char
+            self.freq = freq
+            self.left = left
+            self.right = right
+
+        def __lt__(self, other):
+            return self.freq < other.freq
+
+    def build_huffman_tree_from_freq(freq):
+        heap = [Node(char=ch, freq=f) for ch, f in freq.items()]
+        heapq.heapify(heap)
+
+        while len(heap) > 1:
+            node1 = heapq.heappop(heap)
+            node2 = heapq.heappop(heap)
+            merged = Node(char=None, freq=node1.freq + node2.freq, left=node1, right=node2)
+            heapq.heappush(heap, merged)
+
+        return heap[0] if heap else None
+
+    def build_huffman_tree(text):
+        freq = {}
+        for ch in text:
+            freq[ch] = freq.get(ch, 0) + 1
+        return build_huffman_tree_from_freq(freq)
+
+    def build_huffman_code_table(root, code='', table=None):
+        if table is None:
+            table = {}
+        if root is not None:
+            if root.char is not None:
+                table[root.char] = code if code != '' else '0'
+            else:
+                build_huffman_code_table(root.left, code + '0', table)
+                build_huffman_code_table(root.right, code + '1', table)
+        return table
+
+    def build_global_huffman(texts):
+        global_freq = {}
+        for text in texts:
+            for ch in text:
+                global_freq[ch] = global_freq.get(ch, 0) + 1
+
+        tree = build_huffman_tree_from_freq(global_freq)
+        code_table = build_huffman_code_table(tree)
+        return tree, code_table
+
+    def huffman_encode(text, code_table):
+        return ''.join(code_table[ch] for ch in text)
+
+    def huffman_decode(encoded_text, tree):
+        decoded_text = ''
+        node = tree
+        for bit in encoded_text:
+            node = node.left if bit == '0' else node.right
+            if node and node.char is not None:
+                decoded_text += node.char
+                node = tree
+        return decoded_text
+    
+    compressed_text_data = [sample['compressed_text'] for sample in test_data]
+    original_text_data = [sample['original_text'] for sample in test_data]
+    
+    tree1, code_table1 = build_global_huffman(compressed_text_data)
+    tree2, code_table2 = build_global_huffman(original_text_data)
+    
+    for sample in test_data:
+        sample['base_compressed_code'] = huffman_encode(sample['compressed_text'], code_table1)
+        sample['base_original_code'] = huffman_encode(sample['original_text'], code_table2)
+        
+    print(f"=================== Base Eecoding Complete ===================")
+    
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(test_data, f, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -306,8 +388,8 @@ if __name__ == "__main__":
     compress_encoder = LLMzip_encode(model, tokenizer)
     compress_decoder = LLMzip_decode(model, tokenizer)
     
-    test_text = "Nikkei [LACK] regains 11,000 level TOKYO - Japan #39;s benchmark Nikkei stock index [LACK] recovered [LACK] [LACK] 11,000 [LACK] Monday morning [LACK] widespread [LACK] prompted by advances in US shares last Friday."
-    test_tokens = np.array(tokenizer.encode(test_text.replace("[LACK]", "[]")))
+    test_text = "Nikkei [] regains 11,000 level TOKYO - Japan #39;s benchmark Nikkei stock index [] recovered [] [] 11,000 [] Monday morning [] widespread [] prompted by advances in US shares last Friday."
+    test_tokens = np.array(tokenizer.encode(test_text))
     print(f"test tokens: {test_tokens}")
     ranks_str, ranks_code = compress_encoder.encode_from_tokens(
         win_size=512,
@@ -326,4 +408,4 @@ if __name__ == "__main__":
         context_start=None,
         is_expand=True
     )
-    print(f'dencoded text: {decoded_text.replace("[]", "[LACK]")}')
+    print(f'dencoded text: {decoded_text}')

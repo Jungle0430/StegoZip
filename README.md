@@ -14,6 +14,7 @@ $ conda create -n stegozip python=3.9.21
 $ conda activate stegozip
 $ pip install -r requirements.txt
 $ python -m spacy download en_core_web_md
+$ cd src && python stego/setup.py build_ext --build-lib=stego/ && cd ..
 ```
 
 3. Run the demo script.

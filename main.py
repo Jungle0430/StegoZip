@@ -3,12 +3,13 @@ import json
 import torch
 import random
 import argparse
+import jsonlines
 import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.deal_data import download_dataset, create_compressed_data
 from src.finetune import finetune_model
-from src.rank_zip import token2binary, binary2token
+from src.rank_zip import token2binary, binary2token, huffman_zip
 from src.main_discop import discop_stego
 from src.restore import restore_message
 from src.evaluation import evaluation
@@ -20,6 +21,12 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
+    
+def str2bool(v):
+    if isinstance(v, bool): return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'): return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'): return False
+    else: raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def main():
     parser = argparse.ArgumentParser()
@@ -30,10 +37,13 @@ def main():
     parser.add_argument("--reduce_ratio", type=float, default=0.3)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--use_unit_info", type=bool, default=True)
+    parser.add_argument("--use_unit_info", type=str2bool, default=True)
+    parser.add_argument("--use_lora", type=str2bool, default=True)
+    parser.add_argument("--whether_restore", type=str2bool, default=True)
+    parser.add_argument("--base_zip", type=str2bool, default=True)
 
     parser.add_argument("--instruction", type=str,
-                        default="You are a text restoration expert. Insert missing words indicated by [LACK] into the input text to reconstruct the original without deleting or modifying existing content.")
+                        default="You are a text restoration expert. Insert missing words indicated by [] into the input text to reconstruct the original without deleting or modifying existing content.")
     parser.add_argument("--end_marker", type=str, default="[END]")
     parser.add_argument("--val_ratio", type=float, default=0.2)
     parser.add_argument("--cutoff_len", type=int, default=512)
@@ -52,7 +62,7 @@ def main():
     parser.add_argument("--target_modules", type=list, default=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
     
     parser.add_argument("--test_size", type=int, default=2000)
-    parser.add_argument("--prefix", type=bool, default=True)
+    parser.add_argument("--prefix", type=str2bool, default=True)
     parser.add_argument("--win_size", type=int, default=1024)
     
     parser.add_argument("--stego_algo", type=str, default="Discop", choices=["Discop", "Meteor"])
@@ -125,7 +135,8 @@ def main():
             "test_size": args.test_size,
             "temperature": args.temperature,
             "prefix": args.prefix,
-            "win_size": args.win_size
+            "win_size": args.win_size,
+            "use_lora": args.use_lora
         }
     
     # DSRP
@@ -134,6 +145,7 @@ def main():
         download_dataset(args.dataset, args.mode, output_file=dataset_path)
     
         compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        model = model.eval()
         create_compressed_data(model,
                             tokenizer,
                             device,
@@ -148,26 +160,43 @@ def main():
     if args.mode == 'train':
         train_data = load_dataset("json", data_files=compressed_dataset_path)['train']
         print(f"Load {len(train_data)} training examples from {compressed_dataset_path}")
-        finetune_model(base_model, tokenizer, train_data, lora_path, train_settings)
+        model = model.train()
+        finetune_model(model, tokenizer, train_data, lora_path, train_settings)
         
     elif args.mode == 'test':
-        with open(compressed_dataset_path, "r") as f:
-            test_dataset = json.load(f)
-        
         results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
+        if os.path.exists(results_file):
+            print(f"Load test data from {results_file}")
+            with open(results_file, "r") as f:
+                test_dataset = json.load(f)
+        else:
+            print(f"Load test data from {compressed_dataset_path}")
+            with open(compressed_dataset_path, "r") as f:
+                test_dataset = json.load(f)
         
-        # ICC
-        token2binary(model, tokenizer, test_dataset, test_settings, results_file)
-        # De-ICC
-        binary2token(model, tokenizer, test_dataset, test_settings, results_file)
         # Restore
-        restore_message(model, tokenizer, test_dataset, test_settings, results_file)
+        if args.whether_restore:
+            restore_message(model, tokenizer, test_dataset, test_settings, results_file)
         
+        if not args.use_lora:
+            print("token-rank mapping does not use Restorer")
+            del model, base_model
+            torch.cuda.empty_cache()
+            model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32).to(device)
+            token2binary(model, tokenizer, test_dataset, test_settings, results_file)
+            binary2token(model, tokenizer, test_dataset, test_settings, results_file)
+        else:
+            token2binary(model, tokenizer, test_dataset, test_settings, results_file)
+            binary2token(model, tokenizer, test_dataset, test_settings, results_file)
+            
+        if args.base_zip:
+            huffman_zip(test_dataset, results_file)
+
     elif args.mode == 'stego':
         stego_dataset_path = f"data/origin/{args.stego_dataset}_train.jsonl"
         download_dataset(args.stego_dataset, 'train', output_file=stego_dataset_path)
-        with open(stego_dataset_path, "r") as f:
-            stego_dataset = json.load(f) 
+        with jsonlines.open(stego_dataset_path) as reader:
+            stego_dataset = [item for item in reader]
         
         results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
         with open(results_file, "r") as f:

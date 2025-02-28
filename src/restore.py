@@ -8,7 +8,7 @@ def generate_prompt_qwen(instruction, input):
     return f"""### Instruction: {instruction} \n### Input: {input} \n### Response: """
 
 def generate_prompt_vicuna(instruction, input):
-    return f"""SYSTEM: {instruction} \nUSER: {input}\nASSISTANT: """
+    return f"""SYSTEM: {instruction}\nUSER: {input}\nASSISTANT: """
 
 def generate_prompt(instruction, compressed_text, model_name):
     if "Qwen" in model_name:

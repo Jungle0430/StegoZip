@@ -9,11 +9,6 @@ from model import load_model
 from stego_utils import *
 from config import Settings, text_default_settings_discop, text_default_settings_sample
 
-settings = text_default_settings_discop
-settings_sample = text_default_settings_sample
-
-model, tokenizer = load_model(settings)
-
 def text_encode(settings: Settings, model, tokenizer, message, prompt, key):
     if settings.algo == 'sample':
         from random_sample_cy import encode_text
@@ -61,8 +56,13 @@ def text_decode(settings: Settings, model, tokenizer, stego, prompt, key, flag=F
     return message_decoded
         
 def discop_stego(test_data, stego_prompt, seed, output_file):
+    settings = text_default_settings_discop
+    settings_sample = text_default_settings_sample
+
+    model, tokenizer = load_model(settings)
+
     for i, sample in tqdm(enumerate(test_data)):
-        message_binary = sample['ranks_code']
+        message_binary = sample['ranks_code_True']
         
         random_binary = ''.join(random.choice('01') for _ in range(len(message_binary)))
         xor_result = ''.join(str(int(a) ^ int(b)) for a, b in zip(message_binary, random_binary))
