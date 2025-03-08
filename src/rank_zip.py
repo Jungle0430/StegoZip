@@ -8,7 +8,8 @@ from typing import List, Tuple, Any, Optional
 
 def get_prefix(instruction, model_name):
     if "Qwen" in model_name:
-        return f"""### Instruction: {instruction} \n### Input: """
+        return f"""<|im_start|>system\n{instruction}<|im_end|>
+<|im_start|>user\n"""
     elif "vicuna" in model_name:
         return f"""SYSTEM: {instruction} \nUSER: """
     else:
@@ -52,7 +53,7 @@ class LLMzip_encode:
                      prompt_tokens: np.ndarray,
                      start_pos: int = 0,
                      past_key_values: Optional[Tuple[Any, ...]] = None,
-                     is_expand: bool = True,
+                     is_expand: bool = False,
                      expand_factor: int = 100,
     ) -> np.ndarray:
         batch_size, prompt_size = prompt_tokens.shape
@@ -81,7 +82,7 @@ class LLMzip_encode:
                           text_tokens: Optional[np.ndarray] = None,
                           with_context_start: bool = False,
                           context_start: Optional[np.ndarray] = None,
-                          is_expand: bool = True,
+                          is_expand: bool = False,
                           expand_factor: int = 100,
                           use_cache: bool = False,
     ) -> np.ndarray:
@@ -183,8 +184,8 @@ class LLMzip_decode:
                      ranks_code,
                      with_context_start: bool = False,
                      context_start: Optional[np.ndarray] = None,
-                     is_expand: bool=True,
-                     expand_factor: int=100):
+                     is_expand: bool = False,
+                     expand_factor: int = 100):
         str_ranks = self._decoder_bin2str(ranks_code)
         ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
         
@@ -238,10 +239,10 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
     
     sample_size = min(test_setting["test_size"], len(test_data))
     print(f"Encoding {sample_size} samples")
-    sampled_data = random.sample(test_data, sample_size)
+    sample_data = random.sample(test_data, sample_size)
     
     # Process samples
-    for data in tqdm(sampled_data, desc="Processing samples"):
+    for data in tqdm(sample_data, desc="Processing samples"):
         # Generate restored text
         start_time = time.time()
         text_tokens = np.array(tokenizer.encode(data["compressed_text"]))
@@ -250,7 +251,7 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
             text_tokens=text_tokens,
             with_context_start=test_setting["prefix"],
             context_start=prefix_tokens,
-            is_expand = True
+            is_expand=False
         )
         end_time = time.time()
         
@@ -261,7 +262,9 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
     print(f"=================== Index Encoding Complete ===================")
     
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(sampled_data, f, ensure_ascii=False, indent=4)
+        json.dump(sample_data, f, ensure_ascii=False, indent=4)
+        
+    return sample_data
 
 def binary2token(model, tokenizer, test_data, test_setting, output_file):
     compress_decoder = LLMzip_decode(model, tokenizer)
@@ -273,10 +276,10 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
     
     sample_size = min(test_setting["test_size"], len(test_data))
     print(f"Decoding {sample_size} samples")
-    sampled_data = random.sample(test_data, sample_size)
+    sample_data = random.sample(test_data, sample_size)
     
     # Process samples
-    for data in tqdm(sampled_data, desc="Processing samples"):
+    for data in tqdm(sample_data, desc="Processing samples"):
         # Generate restored text
         start_time = time.time()
         decoded_text = compress_decoder.decode_ranks(
@@ -284,7 +287,7 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
             ranks_code=data["ranks_code_True"],
             with_context_start=test_setting["prefix"],
             context_start=prefix_tokens,
-            is_expand=True
+            is_expand=False
         )
         end_time = time.time()
         
@@ -294,7 +297,9 @@ def binary2token(model, tokenizer, test_data, test_setting, output_file):
     print(f"=================== Index Decoding Complete ===================")
     
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(sampled_data, f, ensure_ascii=False, indent=4)
+        json.dump(sample_data, f, ensure_ascii=False, indent=4)
+    
+    return sample_data
         
 def huffman_zip(test_data, output_file):
     from argparse import Namespace
@@ -396,7 +401,7 @@ if __name__ == "__main__":
         text_tokens=test_tokens,
         with_context_start=False,
         context_start=None,
-        is_expand=True
+        is_expand=False
     )
     print(f"Ranks string: {ranks_str}")
     print(f"Ranks code: {ranks_code}")
@@ -406,6 +411,6 @@ if __name__ == "__main__":
         ranks_code=ranks_code,
         with_context_start=False,
         context_start=None,
-        is_expand=True
+        is_expand=False
     )
     print(f'dencoded text: {decoded_text}')

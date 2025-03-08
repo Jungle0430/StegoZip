@@ -4,10 +4,20 @@ import torch
 import random
 from tqdm import tqdm
 
-def generate_prompt_qwen(instruction, input):
-    return f"""### Instruction: {instruction} \n### Input: {input} \n### Response: """
+def clean_text(text):
+    """Clean whitespace and newlines in text"""
+    return " ".join(text.strip().split())
 
-def generate_prompt_vicuna(instruction, input):
+def generate_prompt_qwen(instruction, input_text):
+    input_text = clean_text(input_text)
+    
+    return f"""<|im_start|>system\n{instruction}<|im_end|>
+<|im_start|>user\n{input_text}<|im_end|>
+<|im_start|>assistant\n"""
+
+def generate_prompt_vicuna(instruction, input_text):
+    input_text = clean_text(input_text)
+    
     return f"""SYSTEM: {instruction}\nUSER: {input}\nASSISTANT: """
 
 def generate_prompt(instruction, compressed_text, model_name):
@@ -21,10 +31,10 @@ def generate_prompt(instruction, compressed_text, model_name):
 def restore_message(model, tokenizer, test_data, test_setting, output_file):
     sample_size = min(test_setting["test_size"], len(test_data))
     print(f"Restoring {sample_size} samples")
-    sampled_data = random.sample(test_data, sample_size)
+    sample_data = random.sample(test_data, sample_size)
 
     # Process samples
-    for data in tqdm(sampled_data, desc="Processing samples"):
+    for data in tqdm(sample_data, desc="Processing samples"):
         # Generate restored text
         start_time = time.time()
         prompt = generate_prompt(test_setting["instruction"], data["compressed_text"], test_setting["model_name"])
@@ -50,7 +60,7 @@ def restore_message(model, tokenizer, test_data, test_setting, output_file):
         end_time = time.time()
         
         if "Qwen" in test_setting["model_name"]:
-            response_start = full_output.find("### Response: ") + len("### Response: ")
+            response_start = full_output.find("assistant\n") + len("assistant\n")
         elif "vicuna" in test_setting["model_name"]:
             response_start = full_output.find("ASSISTANT: ") + len("ASSISTANT: ")
         else:
@@ -69,4 +79,6 @@ def restore_message(model, tokenizer, test_data, test_setting, output_file):
     print(f"=================== Restore Data Complete ===================")
     
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(sampled_data, f, indent=4, ensure_ascii=False)
+        json.dump(sample_data, f, indent=4, ensure_ascii=False)
+    
+    return sample_data

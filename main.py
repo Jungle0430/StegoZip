@@ -13,7 +13,7 @@ from src.rank_zip import token2binary, binary2token, huffman_zip
 from src.main_discop import discop_stego
 from src.restore import restore_message
 from src.evaluation import evaluation
-from peft import prepare_model_for_int8_training, PeftModel
+from peft import PeftModel
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -33,7 +33,7 @@ def main():
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B", choices=["Qwen/Qwen2.5-7B", "lmsys/vicuna-7b-v1.5"])
     parser.add_argument("--dataset", type=str, default="ag_news", choices=["ag_news", "imdb"])
     parser.add_argument("--mode", type=str, default="test", choices=["train", "test", "stego", "eval"])
-    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--temperature", type=float, default=0.3)
     parser.add_argument("--reduce_ratio", type=float, default=0.3)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
@@ -43,23 +43,25 @@ def main():
     parser.add_argument("--base_zip", type=str2bool, default=True)
 
     parser.add_argument("--instruction", type=str,
-                        default="You are a text restoration expert. Insert missing words indicated by [] into the input text to reconstruct the original without deleting or modifying existing content.")
+                        default="You are a text restoration specialist. Your task is to ONLY fill in the missing content within square brackets [] in the input text. Requirements:\n1. Strictly preserve all existing text and punctuation outside brackets.\n2. Maintain original text structure and formatting.")
     parser.add_argument("--end_marker", type=str, default="[END]")
+    parser.add_argument("--train_size", type=int, default=-1)
+    parser.add_argument("--stable_ratio", type=float, default=0.1)
     parser.add_argument("--val_ratio", type=float, default=0.2)
-    parser.add_argument("--cutoff_len", type=int, default=512)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--micro_batch_size", type=int, default=2)
-    parser.add_argument("--warmup_ratio", type=float, default=0.05)
+    parser.add_argument("--cutoff_len", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--micro_batch_size", type=int, default=32)
+    parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--logging_steps", type=int, default=100)
-    parser.add_argument("--eval_steps", type=int, default=500)
-    parser.add_argument("--save_steps", type=int, default=500)
-    parser.add_argument("--save_total_limit", type=str, default=2)
-    parser.add_argument("--lora_r", type=int, default=8)
+    parser.add_argument("--learning_rate", type=float, default=3e-5)
+    parser.add_argument("--logging_steps", type=int, default=50)
+    parser.add_argument("--eval_steps", type=int, default=350)
+    parser.add_argument("--save_steps", type=int, default=350)
+    parser.add_argument("--save_total_limit", type=int, default=3)
+    parser.add_argument("--lora_r", type=int, default=16)
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
-    parser.add_argument("--target_modules", type=list, default=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+    parser.add_argument("--target_modules", nargs='+', default=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
     
     parser.add_argument("--test_size", type=int, default=2000)
     parser.add_argument("--prefix", type=str2bool, default=True)
@@ -77,15 +79,16 @@ def main():
     print(f"LoRA model path: {lora_path}")
     
     if args.mode == 'train':
-        base_model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             args.model_name,
             load_in_8bit=True,
             device_map="auto",
             torch_dtype=torch.float16,
             trust_remote_code=True
         )
-        model = prepare_model_for_int8_training(base_model)
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True)
+        # <unk> token tokenizer.convert_ids_to_tokens(128244)
+        tokenizer.pad_token = "<unk>"
         
         train_settings = {
             "model_name": args.model_name,
@@ -145,21 +148,37 @@ def main():
         download_dataset(args.dataset, args.mode, output_file=dataset_path)
     
         compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*10)}_{int(args.eta*10)}.json"
-        model = model.eval()
         create_compressed_data(model,
-                            tokenizer,
-                            device,
-                            dataset_path,
-                            compressed_dataset_path,
-                            args.mode,
-                            ave_info=ave_info,
-                            reduce_ratio=args.reduce_ratio,
-                            eta=args.eta,
-                            use_unit_info=args.use_unit_info)
+                               tokenizer,
+                               device,
+                               dataset_path,
+                               compressed_dataset_path,
+                               args.mode,
+                               ave_info=ave_info,
+                               reduce_ratio=args.reduce_ratio,
+                               eta=args.eta,
+                               use_unit_info=args.use_unit_info)
     
     if args.mode == 'train':
         train_data = load_dataset("json", data_files=compressed_dataset_path)['train']
+        
+        if args.train_size > 0:
+            train_data = train_data.select(range(args.train_size))
         print(f"Load {len(train_data)} training examples from {compressed_dataset_path}")
+        
+        # Fine-tuning is more stable and avoids over-modification
+        indices = np.random.choice(len(train_data), size=int(len(train_data)*args.stable_ratio), replace=False)
+        def modify_func(example, idx):
+            if idx in indices:
+                return {"compressed_text": example["original_text"]}
+            return {"compressed_text": example["compressed_text"]}
+
+        train_data = train_data.map(
+            lambda example, idx: modify_func(example, idx),
+            with_indices=True,
+            load_from_cache_file=False
+        )
+        
         model = model.train()
         finetune_model(model, tokenizer, train_data, lora_path, train_settings)
         
@@ -176,18 +195,18 @@ def main():
         
         # Restore
         if args.whether_restore:
-            restore_message(model, tokenizer, test_dataset, test_settings, results_file)
+            test_dataset = restore_message(model, tokenizer, test_dataset, test_settings, results_file)
         
         if not args.use_lora:
             print("token-rank mapping does not use Restorer")
             del model, base_model
             torch.cuda.empty_cache()
             model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32).to(device)
-            token2binary(model, tokenizer, test_dataset, test_settings, results_file)
-            binary2token(model, tokenizer, test_dataset, test_settings, results_file)
+            test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
+            test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, results_file)
         else:
-            token2binary(model, tokenizer, test_dataset, test_settings, results_file)
-            binary2token(model, tokenizer, test_dataset, test_settings, results_file)
+            test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
+            test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, results_file)
             
         if args.base_zip:
             huffman_zip(test_dataset, results_file)

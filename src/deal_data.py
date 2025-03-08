@@ -55,6 +55,7 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
         return
     
     from src.semantic_compressor import SemanticCompressor
+    model = model.eval()
     compressor = SemanticCompressor(model, tokenizer, device, ave_info=ave_info, eta=eta)
     results = []
     

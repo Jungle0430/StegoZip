@@ -92,6 +92,7 @@ class SemanticCompressor:
             
             # Calculate the sum self-information for the word
             if word_token_self_info:
+                # word_self_info.append(np.mean(word_token_self_info))
                 word_self_info.append(np.sum(word_token_self_info))
             else:
                 word_self_info.append(np.inf)  # If no tokens match, set self-information to inf
@@ -142,7 +143,7 @@ class SemanticCompressor:
                 if info >= threshold:
                     compressed_words.append(word)
                 else:
-                    compressed_words.append(' [LACK]')
+                    compressed_words.append(' []')
                     masked_words.append(word)
             
             compressed_text = ''.join(compressed_words)
