@@ -42,7 +42,7 @@ def download_dataset(dataset_name, split, output_file):
 
     print("Successfully saved data to " + output_file)
     
-def create_compressed_data(model, tokenizer, device, input_file, output_file, mode='train', ave_info=0, reduce_ratio=0.3, eta=1.0, use_unit_info=True):
+def create_compressed_data(model, tokenizer, device, input_file, output_file, mode='train', ave_info=0, reduce_ratio=0.3, eta=1.0, use_unit_info=True, marked_word="[]"):
     if mode not in ['train', 'test']:
         raise ValueError("Invalid mode! Must be either 'train' or 'test'.")
     
@@ -68,6 +68,15 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
                 reduce_ratio=reduce_ratio,
                 use_unit_info=use_unit_info
             )
+            
+            compressed_words = compressed_text.split()
+            original_words = item['content'].split()
+            
+            for i in range(len(compressed_words)):
+                if compressed_words[i] == marked_word:
+                    original_words[i] = f"[{original_words[i]}]"
+            original_text = " ".join(original_words)
+            
             end_time = time.time()
             
             # compressed_tokens, masked_tokens = compressor.compress_text(
@@ -83,7 +92,8 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
             # Write the enhanced data
             sample = {
                 "id": item['id'],
-                "original_text": item['content'],
+                "content": item['content'],
+                "original_text": original_text,
                 "compressed_text": compressed_text,
                 "compress_time_cost": round(end_time - start_time, 6),
                 # "compressed_tokens": compressed_tokens,

@@ -36,7 +36,7 @@ class LLMzip_encode:
         str_out = str()
         for i in range(array_used.size):
             str_out += (str(array_used[i]) if array_used[i] != -1 else '') + ' '
-        return str_out
+        return str_out[:-1]
     
     def _encoder_str2bin(self, string_data):
         encoding_map = {
