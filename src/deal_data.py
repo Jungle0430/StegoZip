@@ -5,6 +5,7 @@ import jsonlines
 import numpy as np
 from tqdm import tqdm
 from datasets import load_dataset, concatenate_datasets
+from src.restore import check_message
 
 def download_dataset(dataset_name, split, output_file):
     dataset_name = dataset_name.lower()
@@ -42,7 +43,7 @@ def download_dataset(dataset_name, split, output_file):
 
     print("Successfully saved data to " + output_file)
     
-def create_compressed_data(model, tokenizer, device, input_file, output_file, mode='train', ave_info=0, reduce_ratio=0.3, eta=1.0, use_unit_info=True, marked_word="[]"):
+def create_compressed_data(model, tokenizer, device, input_file, output_file, mode='train', setting=None, ave_info=0, reduce_ratio=0.3, eta=1.0, use_unit_info=True, marked_word="[]"):
     if mode not in ['train', 'test']:
         raise ValueError("Invalid mode! Must be either 'train' or 'test'.")
     
@@ -101,6 +102,8 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
                 "self_info": self_info,
                 # "masked_tokens": masked_tokens
             }
+            if mode == 'test':
+                check_message(model, tokenizer, sample, setting)
             results.append(sample)
             
     with open(output_file, 'w', encoding='utf-8') as f:

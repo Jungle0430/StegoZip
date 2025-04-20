@@ -1,6 +1,7 @@
 import os
 import json
 import torch
+import bert_score
 import subprocess
 import numpy as np
 from argparse import Namespace
@@ -133,10 +134,64 @@ def evaluation(input_file, output_file):
     with open(input_file, "r") as f:
         test_data = json.load(f)
     
+    # calculate bert score
+    original_texts = [clean_text(s['original_text'].replace("[", "").replace("]", "")) for s in test_data]
+    restored_texts = [clean_text(s['restored_text'].replace("[", "").replace("]", "")) for s in test_data]
+    compressed_texts = [clean_text(s['compressed_text'].replace("[", "").replace("]", "")) for s in test_data]
+
+    P_restored, R_restored, F1_restored = bert_score.score(
+        cands=restored_texts,
+        refs=original_texts,
+        lang='en',
+        # model_type='bert-base-uncased',
+        model_type='roberta-large',
+        verbose=True
+    )
+
+    P_compressed, R_compressed, F1_compressed = bert_score.score(
+        cands=compressed_texts,
+        refs=original_texts,
+        lang='en',
+        # model_type='bert-base-uncased',
+        model_type='roberta-large',
+        verbose=True
+    )
+
+    for i, sample in enumerate(test_data):
+        sample['bert_scores'] = {
+            'original_restored': {
+                'precision': float(P_restored[i].numpy()),
+                'recall': float(R_restored[i].numpy()),
+                'f1': float(F1_restored[i].numpy())
+            },
+            'original_compressed': {
+                'precision': float(P_compressed[i].numpy()),
+                'recall': float(R_compressed[i].numpy()),
+                'f1': float(F1_compressed[i].numpy())
+            }
+        }
+
+    avg_bert = {
+        'original_restored': {
+            'precision': float(np.mean(P_restored.numpy())),
+            'recall': float(np.mean(R_restored.numpy())),
+            'f1': float(np.mean(F1_restored.numpy()))
+        },
+        'original_compressed': {
+            'precision': float(np.mean(P_compressed.numpy())),
+            'recall': float(np.mean(R_compressed.numpy())),
+            'f1': float(np.mean(F1_compressed.numpy()))
+        }
+    }
+    
+    average_metrics = {
+        'bert_score': avg_bert
+    }
+    
     # cauculate psp
     psp_calculator = PSPCalculator()
-    original_compressed_pairs = [(s['original_text'], s['compressed_text']) for s in test_data]
-    original_restored_pairs = [(s['original_text'], s['restored_text']) for s in test_data]
+    original_compressed_pairs = [(ori, com) for ori, com in zip(original_texts, compressed_texts)]
+    original_restored_pairs = [(ori, res) for ori, res in zip(original_texts, restored_texts)]
     
     psp_oc = psp_calculator.calculate_psp(
         [p[0] for p in original_compressed_pairs],
@@ -156,11 +211,9 @@ def evaluation(input_file, output_file):
     avg_oc = np.mean(psp_oc)
     avg_or = np.mean(psp_or)
     
-    average_metrics = {
-        'psp': {
+    average_metrics['psp'] = {
             'original_compressed': np.float64(avg_oc),
             'original_restored': np.float64(avg_or)
-        }
     }
     
     # calculate rouge
@@ -237,11 +290,13 @@ def evaluation(input_file, output_file):
     time4 = np.mean([sample["stego"]['decode_time'] for sample in test_data])
     time5 = np.mean([sample["decode_time_cost"] for sample in test_data])
     time6 = np.mean([sample["restore_time_cost"] for sample in test_data])
+    time7 = np.mean([sample["check_time"] for sample in test_data])
     
-    encode_time = time1 + time2 + time3
+    encode_time = time1 + time2 + time3 + time7
     decode_time = time4 + time5 + time6
     average_metrics['time'] = {
         'DSRP': round(time1, 6),
+        'Check': round(time7, 6),
         'ICC': round(time2, 6),
         'Embed': round(time3, 6),
         'Extract': round(time4, 6),

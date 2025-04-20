@@ -30,9 +30,10 @@ def str2bool(v):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B", choices=["Qwen/Qwen2.5-7B", "lmsys/vicuna-7b-v1.5"])
-    parser.add_argument("--dataset", type=str, default="ag_news", choices=["ag_news", "imdb"])
     parser.add_argument("--mode", type=str, default="test", choices=["train", "test", "stego", "eval"])
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B")
+    parser.add_argument("--dataset", type=str, default="ag_news")
+    parser.add_argument("--domain", type=str, default="business", choices=["world", "sports", "business", "tech", "comment"])
     parser.add_argument("--temperature", type=float, default=0.3)
     parser.add_argument("--reduce_ratio", type=float, default=0.3)
     parser.add_argument("--eta", type=float, default=1.0)
@@ -65,9 +66,9 @@ def main():
     
     parser.add_argument("--test_size", type=int, default=2000)
     parser.add_argument("--prefix", type=str2bool, default=True)
-    parser.add_argument("--win_size", type=int, default=1024)
+    parser.add_argument("--max_new_tokens", type=int, default=1024)
     
-    parser.add_argument("--stego_algo", type=str, default="Discop", choices=["Discop", "Meteor"])
+    parser.add_argument("--stego_algo", type=str, default="Discop", choices=["ADG", "Meteor", "Discop", "SparSamp"])
     parser.add_argument("--stego_dataset", type=str, default="wikitext")
     
     args = parser.parse_args()
@@ -75,7 +76,7 @@ def main():
     setup_seed(args.seed)
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    lora_path = f"checkpoint/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}"
+    lora_path = f"checkpoint/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}"
     print(f"LoRA model path: {lora_path}")
     
     if args.mode == 'train':
@@ -112,9 +113,12 @@ def main():
         }
         ave_info = 0.0
         args.eta = 0.0
+        
     elif args.mode == 'test':
-        base_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32).to(device)
+        base_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32, device_map="auto")
         tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+        tokenizer.pad_token_id = 128244
+        tokenizer.pad_token = "<unk>"
         
         if os.path.exists(lora_path):
             model = PeftModel.from_pretrained(base_model, lora_path)
@@ -123,7 +127,7 @@ def main():
         else:
             raise FileNotFoundError(f"LoRA model {lora_path} does not exist!")
         
-        train_compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_train_{int(args.reduce_ratio*100)}.json"
+        train_compressed_dataset_path = f"data/compress/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_train_{int(args.reduce_ratio*100)}.json"
         if os.path.exists(train_compressed_dataset_path):
             with open(train_compressed_dataset_path, "r") as f:
                 train_data = json.load(f)
@@ -139,16 +143,17 @@ def main():
             "test_size": args.test_size,
             "temperature": args.temperature,
             "prefix": args.prefix,
-            "win_size": args.win_size,
-            "use_lora": args.use_lora
+            "max_new_tokens": args.max_new_tokens,
+            "use_lora": args.use_lora,
+            "seed": args.seed
         }
     
     # DSRP
     if args.mode == 'train':
-        dataset_path = f"data/origin/{args.dataset}_{args.mode}.jsonl"
+        dataset_path = f"data/origin/{args.dataset}_{args.domain}_{args.mode}.jsonl"
         download_dataset(args.dataset, args.mode, output_file=dataset_path)
     
-        compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*100)}.json"
+        compressed_dataset_path = f"data/compress/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{args.mode}_{int(args.reduce_ratio*100)}.json"
         create_compressed_data(model,
                                tokenizer,
                                device,
@@ -161,16 +166,17 @@ def main():
                                use_unit_info=args.use_unit_info)
 
     elif args.mode == 'test':
-        dataset_path = f"data/origin/{args.dataset}_{args.mode}.jsonl"
+        dataset_path = f"data/origin/{args.dataset}_{args.domain}_{args.mode}.jsonl"
         download_dataset(args.dataset, args.mode, output_file=dataset_path)
         
-        compressed_dataset_path = f"data/compress/{args.model_name.split('/')[0]}_{args.dataset}_{args.mode}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
+        compressed_dataset_path = f"data/compress/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{args.mode}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
         create_compressed_data(model,
                                tokenizer,
                                device,
                                dataset_path,
                                compressed_dataset_path,
-                               args.mode,
+                               mode=args.mode,
+                               setting=test_settings,
                                ave_info=ave_info,
                                reduce_ratio=args.reduce_ratio,
                                eta=args.eta,
@@ -200,7 +206,7 @@ def main():
         finetune_model(model, tokenizer, train_data, lora_path, train_settings)
         
     elif args.mode == 'test':
-        results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
+        results_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
         if os.path.exists(results_file):
             print(f"Load test data from {results_file}")
             with open(results_file, "r") as f:
@@ -218,7 +224,7 @@ def main():
             print("token-rank mapping does not use Restorer")
             del model, base_model
             torch.cuda.empty_cache()
-            model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32).to(device)
+            model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32, device_map="auto")
             test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
             test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, results_file)
         else:
@@ -234,7 +240,7 @@ def main():
         with jsonlines.open(stego_dataset_path) as reader:
             stego_dataset = [item for item in reader]
         
-        results_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
+        results_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
         with open(results_file, "r") as f:
             test_dataset = json.load(f)
             
@@ -247,7 +253,7 @@ def main():
             length = len(sentences)
             stego_prompt.append('. '.join(sentences[:2]) if length > 2 else text)
         
-        stego_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
+        stego_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
         if args.stego_algo == 'Discop':
             discop_stego(test_dataset, stego_prompt, args.seed, stego_file)
         else:
@@ -255,8 +261,8 @@ def main():
             raise ValueError(f"Invalid stego algorithm: {args.stego_algo}")     
         
     elif args.mode == 'eval':
-        stego_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
-        eval_file = f"result/{args.model_name.split('/')[0]}_{args.dataset}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_eval.json"
+        stego_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
+        eval_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_eval.json"
         evaluation(stego_file, eval_file)
         
     else:

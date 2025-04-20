@@ -5,6 +5,19 @@ import random
 import numpy as np
 from tqdm import tqdm
 from typing import List, Tuple, Any, Optional
+from transformers import LogitsProcessor, LogitsProcessorList
+
+pseudo_binary_stream_file = "src/pseudo_binary_stream.txt"
+with open(pseudo_binary_stream_file, "r") as file:
+    pseudo_binary_stream = file.read()
+key_stream = ''.join(str(bit) for bit in pseudo_binary_stream)
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 def get_prefix(instruction, model_name):
     if "Qwen" in model_name:
@@ -15,21 +28,19 @@ def get_prefix(instruction, model_name):
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
     
-class LLMzip_encode:
-    def __init__(self, model, tokenizer):
-        self.model = model
-        self.model.eval()
-        self.tokenizer = tokenizer
-        self.pad_id = 0
-        self.bos_id = 1
-        self.eos_id = 2
-        self.lack_token = np.array(tokenizer.encode(" []"))
+class Rank_Encoder(LogitsProcessor):
+    def __init__(self,
+                 eos_token_id: int = None,
+                 lack_token: int = None):
+        self.eos_token_id = eos_token_id
+        self.lack_token = lack_token
         
-    def _gen_rank(self, probs, next_token):
-        probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True, stable=True)
-        rank = torch.where(probs_idx == next_token)[-1]
-        prob = probs_sort[rank]
-        return rank, prob
+    def initialize(self,
+                   text_tokens: List[int]):
+        self.text_tokens = text_tokens
+        self.current_pos = 0
+        self.ranks_list = []
+        self.lack_position = np.where(self.text_tokens == self.lack_token[0])[0]
     
     def _get_str_array(self, array):
         array_used = array.reshape(-1)
@@ -45,100 +56,57 @@ class LLMzip_encode:
             '8': '1000', '9': '1001', ' ': '11'
         }
         binary_string = ''.join(encoding_map[char] for char in string_data)
-        # binary_string += '0000'
 
         return binary_string
-        
-    def _encode_batch(self,
-                     prompt_tokens: np.ndarray,
-                     start_pos: int = 0,
-                     past_key_values: Optional[Tuple[Any, ...]] = None,
-                     is_expand: bool = False,
-                     expand_factor: int = 100,
-    ) -> np.ndarray:
-        batch_size, prompt_size = prompt_tokens.shape
-        
-        tokens = torch.full((batch_size, prompt_size), self.pad_id).cuda().long()
-        tokens[:batch_size, :prompt_size] = torch.tensor(prompt_tokens).long()
-        rank_list = []
-        prob_list = []
-        
-        outputs = self.model.forward(tokens)
-        logits = outputs['logits'][0].to(tokens.device)
-
-        if is_expand:
-            logits = logits * expand_factor
-        
-        probs = torch.softmax(logits, dim=-1)
-        for cur_pos in range(start_pos, tokens.shape[1]):
-            rank, prob = self._gen_rank(probs[cur_pos - 1], next_token=tokens[:, cur_pos])
-            rank_list.append(rank.cpu().numpy())
-            prob_list.append(prob.detach().cpu().numpy())
-           
-        return rank_list, prob_list
     
-    def encode_from_tokens(self,
-                          win_size: int,
-                          text_tokens: Optional[np.ndarray] = None,
-                          with_context_start: bool = False,
-                          context_start: Optional[np.ndarray] = None,
-                          is_expand: bool = False,
-                          expand_factor: int = 100,
-                          use_cache: bool = False,
-    ) -> np.ndarray:
-        ranks_list = []
-        probs_list = []
-        
-        if with_context_start:
-            tokens_full = np.concatenate([context_start, text_tokens])
-            start_pos = len(context_start)
-        else:
-            tokens_full = text_tokens
-            start_pos = 1
+    def get_ranks(self):
+        for pos in self.lack_position:
+            self.ranks_list[pos] = np.array([-1])
             
-        tokens_in = np.array([tokens_full[ :win_size].tolist()])
-        tokens_in = np.insert(tokens_in, 0, 0, axis=1)
-        ranks, probs = self._encode_batch(tokens_in, 1, is_expand=is_expand, expand_factor=expand_factor)
-        ranks_list += ranks
-        probs_list += probs
-        
-        half_win_size = win_size // 2
-        n_batches = np.ceil(tokens_full.size / half_win_size).astype(int) - 1
-        for b_ind in range(1, n_batches):
-            token_start = b_ind * half_win_size
-            token_stop = np.minimum(tokens_full.size, (b_ind + 2) * half_win_size)
-            tokens_batch = np.array([tokens_full[token_start : token_stop].tolist()])
-            
-            ranks, probs = self._encode_batch(tokens_batch, half_win_size, is_expand=is_expand, expand_factor=expand_factor)
-            ranks_list += ranks
-            probs_list += probs
-          
-        if with_context_start:
-            ranks_list = ranks_list[start_pos:]
-            # probs_list = probs_list[start_pos:]
-
-        lack_position = np.where(text_tokens == self.lack_token[0])[0]
-        for pos in lack_position:
-            ranks_list[pos] = np.array([-1])
-        
-        ranks_full = np.concatenate(ranks_list, 0).squeeze()
-        # probs_full = np.concatenate(probs_list, 0).squeeze()
+        ranks_full = np.concatenate(self.ranks_list, 0).squeeze()
 
         str_ranks = self._get_str_array(ranks_full)
         ranks_code = self._encoder_str2bin(str_ranks)
         
-        return str_ranks, ranks_code
+        random_index = random.randint(0, len(key_stream) - len(ranks_code))
+        xor_result = ''.join(str(int(rank_bit) ^ int(seq_bit)) for rank_bit, seq_bit in 
+                             zip(ranks_code, key_stream[random_index:random_index+len(ranks_code)]))
+        return str_ranks, xor_result
+    
+    def __call__(self, input_ids, scores):
+        if self.current_pos >= len(self.text_tokens):
+            scores[:] = float('-inf')
+            scores[:, self.eos_token_id] = 1e8
+            return scores
+        
+        target_id = self.text_tokens[self.current_pos]
+        
+        sorted_indices = torch.argsort(scores, dim=-1, descending=True)
+        rank = (sorted_indices == target_id).nonzero(as_tuple=True)[1].item()
+        modified_scores = torch.full_like(scores, float('-inf'))
+        modified_scores[0, target_id] = 1e8
+        
+        self.ranks_list.append(np.array([rank]))
+        self.current_pos += 1
+        
+        return modified_scores
 
-class LLMzip_decode:
-    def __init__(self, model, tokenizer):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.pad_id = 0
-        self.bos_id = 1
-        self.eos_id = 2
-        self.start_token = self.pad_id
-        self.vocab = tokenizer.get_vocab()
-        self.lack_token = torch.tensor(tokenizer.encode(" []")).long().cuda()
+class Rank_Decoder(LogitsProcessor):
+    def __init__(self,
+                 eos_token_id: int = None,
+                 lack_token: int = None):
+        self.eos_token_id = eos_token_id
+        self.lack_token = torch.tensor(lack_token).long().cuda()
+        
+    def initialize(self,
+                   binary_ranks: str):
+        random_index = random.randint(0, len(key_stream) - len(binary_ranks))
+        xor_result = ''.join(str(int(rank_bit) ^ int(seq_bit)) for rank_bit, seq_bit in 
+                             zip(binary_ranks, key_stream[random_index:random_index+len(binary_ranks)]))
+        str_ranks = self._decoder_bin2str(xor_result)
+        ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
+        self.ranks = torch.tensor(ranks_in).reshape(-1).cuda()
+        self.current_pos = 0
         
     def _decoder_bin2str(self, binary_string):
         decoding_map = {
@@ -151,8 +119,6 @@ class LLMzip_decode:
         binary_data = ''
         flag = False
         for i in range(len(binary_string)):
-            if binary_string[i] == 'x':
-                break
             temp += binary_string[i]
             if temp == '11':
                 if flag:
@@ -174,90 +140,69 @@ class LLMzip_decode:
 
         return binary_data
         
-    def _gen_next_token(self, probs, rank):
+    def __call__(self, input_ids, scores):
+        if self.current_pos >= len(self.ranks):
+            scores[:] = float('-inf')
+            scores[:, self.eos_token_id] = 1e8
+            return scores
+        
+        if self.ranks[self.current_pos] == -1:
+            scores[:] = float('-inf')
+            scores[:, self.lack_token] = 1e8
+            return scores
+        
+        probs = torch.softmax(scores[-1], dim=-1)
         probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True, stable=True)
-        next_token = torch.gather(probs_idx, -1, rank)
-        return next_token
         
-    def decode_ranks(self,
-                     win_size,
-                     ranks_code,
-                     with_context_start: bool = False,
-                     context_start: Optional[np.ndarray] = None,
-                     is_expand: bool = False,
-                     expand_factor: int = 100):
-        str_ranks = self._decoder_bin2str(ranks_code)
-        ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
+        next_token = torch.gather(probs_idx, -1, self.ranks[self.current_pos])
+        modified_scores = torch.full_like(scores, float('-inf'))
+        modified_scores[0, next_token] = 1e8
+        self.current_pos += 1
         
-        batch_size = 1  
-        total_length = ranks_in.shape[0]
-        
-        if with_context_start:
-            context_start = np.insert(context_start, 0, 0)
-            total_length += len(context_start)
-            ranks_in = np.append(np.zeros(len(context_start), dtype=np.int64), ranks_in)
-            ranks = torch.tensor(ranks_in).reshape(batch_size,-1).cuda()
-        else:
-            total_length += 1
-            ranks_in = np.append(np.zeros(1, dtype=np.int64), ranks_in)
-            ranks = torch.tensor(ranks_in).reshape(batch_size, -1).cuda()
-
-        tokens = torch.full((batch_size, total_length), self.pad_id).long()
-
-        if with_context_start:
-            tokens[:, :len(context_start)] = torch.tensor(context_start).long()
-            start_pos = len(context_start)
-        else:
-            tokens[:, 0] = self.pad_id
-            start_pos = 1
-        tokens = tokens.cuda()
-        
-        for cur_pos in range(start_pos, total_length):
-            if ranks[:, cur_pos] == -1:
-                tokens[:, cur_pos] = self.lack_token[0]
-                continue
-            
-            logits = self.model.forward(tokens[:, :cur_pos])['logits'][0][-1]
-            if is_expand:
-                logits = logits * expand_factor
-
-            probs = torch.softmax(logits, dim=-1)
-            next_token = self._gen_next_token(probs, ranks[:, cur_pos])
-            tokens[:, cur_pos] = next_token.clone().detach().long()
-        
-        decoded_text = self.tokenizer.decode(tokens.tolist()[0][1:][start_pos-1:])
-        
-        return decoded_text
+        return modified_scores
     
-def token2binary(model, tokenizer, test_data, test_setting, output_file):
-    compress_encoder = LLMzip_encode(model, tokenizer)
-    if test_setting["prefix"]:
-        prefix = get_prefix(test_setting["instruction"], test_setting["model_name"])
+def token2binary(model, tokenizer, test_data, test_settings, output_file):
+    setup_seed(test_settings['seed'])
+    rank_encoder = Rank_Encoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
+    if test_settings["prefix"]:
+        prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])
     else:
         prefix = ""
-    prefix_tokens = np.array(tokenizer.encode(prefix))
+    prefix_tokens = tokenizer.encode(prefix, return_tensors="pt").to(model.device)
     
-    sample_size = min(test_setting["test_size"], len(test_data))
+    sample_size = min(test_settings["test_size"], len(test_data))
     print(f"Encoding {sample_size} samples")
     sample_data = random.sample(test_data, sample_size)
     
     # Process samples
     for data in tqdm(sample_data, desc="Processing samples"):
         # Generate restored text
-        start_time = time.time()
-        text_tokens = np.array(tokenizer.encode(data["compressed_text"]))
-        ranks_str, ranks_code = compress_encoder.encode_from_tokens(
-            win_size=test_setting["win_size"],
-            text_tokens=text_tokens,
-            with_context_start=test_setting["prefix"],
-            context_start=prefix_tokens,
-            is_expand=False
-        )
-        end_time = time.time()
-        
-        data[f"ranks_str_{test_setting['use_lora']}"] = ranks_str
-        data[f"ranks_code_{test_setting['use_lora']}"] = ranks_code
-        data[f"encode_time_cost"] = round(end_time - start_time, 6)
+        try:
+            start_time = time.time()
+            text_tokens = tokenizer.encode(data["compressed_text"])
+            rank_encoder.initialize(text_tokens)
+            
+            with torch.no_grad():
+                outputs = model.generate(input_ids=prefix_tokens,
+                                        max_new_tokens=test_settings["max_new_tokens"],
+                                        do_sample=False,
+                                        logits_processor=LogitsProcessorList([rank_encoder]),
+                                        early_stopping=True,
+                                        pad_token_id=tokenizer.pad_token_id)
+            ranks_str, ranks_code = rank_encoder.get_ranks()
+            end_time = time.time()
+            
+            data[f"ranks_str_{test_settings['use_lora']}"] = ranks_str
+            data[f"ranks_code_{test_settings['use_lora']}"] = ranks_code
+            data[f"encode_time_cost"] = round(end_time - start_time, 6)
+            
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"data ID: {data['id']}")
+            data[f"ranks_str_{test_settings['use_lora']}"] = ''
+            data[f"ranks_code_{test_settings['use_lora']}"] = ''
+            data[f"encode_time_cost"] = 0
+            continue
     
     print(f"=================== Index Encoding Complete ===================")
     
@@ -266,33 +211,46 @@ def token2binary(model, tokenizer, test_data, test_setting, output_file):
         
     return sample_data
 
-def binary2token(model, tokenizer, test_data, test_setting, output_file):
-    compress_decoder = LLMzip_decode(model, tokenizer)
-    if test_setting["prefix"]:
-        prefix = get_prefix(test_setting["instruction"], test_setting["model_name"])
+def binary2token(model, tokenizer, test_data, test_settings, output_file):
+    setup_seed(test_settings['seed'])
+    rank_decoder = Rank_Decoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
+    if test_settings["prefix"]:
+        prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])
     else:
         prefix = ""
-    prefix_tokens = np.array(tokenizer.encode(prefix))
+    prefix_tokens = tokenizer.encode(prefix, return_tensors="pt").to(model.device)
+    prefix_pos = prefix_tokens.shape[1]
     
-    sample_size = min(test_setting["test_size"], len(test_data))
+    sample_size = min(test_settings["test_size"], len(test_data))
     print(f"Decoding {sample_size} samples")
     sample_data = random.sample(test_data, sample_size)
     
     # Process samples
     for data in tqdm(sample_data, desc="Processing samples"):
-        # Generate restored text
-        start_time = time.time()
-        decoded_text = compress_decoder.decode_ranks(
-            win_size=test_setting["win_size"],
-            ranks_code=data["ranks_code_True"],
-            with_context_start=test_setting["prefix"],
-            context_start=prefix_tokens,
-            is_expand=False
-        )
-        end_time = time.time()
-        
-        data[f"decoded_text_{test_setting['use_lora']}"] = decoded_text
-        data[f"decode_time_cost"] = round(end_time - start_time, 6)
+        try:
+            # Generate restored text
+            start_time = time.time()
+            rank_decoder.initialize(data["ranks_code_True"])
+            with torch.no_grad():
+                outputs = model.generate(input_ids=prefix_tokens,
+                                        max_new_tokens=test_settings["max_new_tokens"],
+                                        do_sample=False,
+                                        logits_processor=LogitsProcessorList([rank_decoder]),
+                                        early_stopping=True,
+                                        pad_token_id=tokenizer.pad_token_id)
+            message_tokens = outputs[0].cpu().numpy()[prefix_pos:]
+            decoded_text = tokenizer.decode(message_tokens, skip_special_tokens=True)
+            end_time = time.time()
+            
+            data[f"decoded_text_{test_settings['use_lora']}"] = decoded_text
+            data[f"decode_time_cost"] = round(end_time - start_time, 6)
+    
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"data ID: {data['id']}")
+            data[f"decoded_text_{test_settings['use_lora']}"] = ''
+            data[f"decode_time_cost"] = 0
+            continue
     
     print(f"=================== Index Decoding Complete ===================")
     
@@ -382,35 +340,3 @@ def huffman_zip(test_data, output_file):
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(test_data, f, ensure_ascii=False, indent=4)
-
-if __name__ == "__main__":
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B", torch_dtype=torch.float32).to(device)
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B")
-    
-    compress_encoder = LLMzip_encode(model, tokenizer)
-    compress_decoder = LLMzip_decode(model, tokenizer)
-    
-    test_text = "Nikkei [] regains 11,000 level TOKYO - Japan #39;s benchmark Nikkei stock index [] recovered [] [] 11,000 [] Monday morning [] widespread [] prompted by advances in US shares last Friday."
-    test_tokens = np.array(tokenizer.encode(test_text))
-    print(f"test tokens: {test_tokens}")
-    ranks_str, ranks_code = compress_encoder.encode_from_tokens(
-        win_size=512,
-        text_tokens=test_tokens,
-        with_context_start=False,
-        context_start=None,
-        is_expand=False
-    )
-    print(f"Ranks string: {ranks_str}")
-    print(f"Ranks code: {ranks_code}")
-    
-    decoded_text = compress_decoder.decode_ranks(
-        win_size=512,
-        ranks_code=ranks_code,
-        with_context_start=False,
-        context_start=None,
-        is_expand=False
-    )
-    print(f'dencoded text: {decoded_text}')
