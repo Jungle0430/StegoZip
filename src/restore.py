@@ -43,8 +43,8 @@ def check_message(model, tokenizer, data, test_setting):
         outputs = model.generate(
             **inputs,
             max_new_tokens=test_setting["max_new_token"],
-            temperature=test_setting["temperature"],
-            do_sample=True,
+            # temperature=test_setting["temperature"],
+            do_sample=False,
             pad_token_id=tokenizer.pad_token_id
         )
         
@@ -108,8 +108,8 @@ def restore_message(model, tokenizer, test_data, test_setting, output_file):
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=test_setting["max_new_token"],
-                temperature=test_setting["temperature"],
-                do_sample=True,
+                # temperature=test_setting["temperature"],
+                do_sample=False,
                 pad_token_id=tokenizer.pad_token_id
             )
         

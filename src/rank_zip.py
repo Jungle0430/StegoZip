@@ -7,11 +7,6 @@ from tqdm import tqdm
 from typing import List, Tuple, Any, Optional
 from transformers import LogitsProcessor, LogitsProcessorList
 
-pseudo_binary_stream_file = "src/pseudo_binary_stream.txt"
-with open(pseudo_binary_stream_file, "r") as file:
-    pseudo_binary_stream = file.read()
-key_stream = ''.join(str(bit) for bit in pseudo_binary_stream)
-
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -67,11 +62,8 @@ class Rank_Encoder(LogitsProcessor):
 
         str_ranks = self._get_str_array(ranks_full)
         ranks_code = self._encoder_str2bin(str_ranks)
-        
-        random_index = random.randint(0, len(key_stream) - len(ranks_code))
-        xor_result = ''.join(str(int(rank_bit) ^ int(seq_bit)) for rank_bit, seq_bit in 
-                             zip(ranks_code, key_stream[random_index:random_index+len(ranks_code)]))
-        return str_ranks, xor_result
+
+        return str_ranks, ranks_code
     
     def __call__(self, input_ids, scores):
         if self.current_pos >= len(self.text_tokens):
@@ -100,10 +92,7 @@ class Rank_Decoder(LogitsProcessor):
         
     def initialize(self,
                    binary_ranks: str):
-        random_index = random.randint(0, len(key_stream) - len(binary_ranks))
-        xor_result = ''.join(str(int(rank_bit) ^ int(seq_bit)) for rank_bit, seq_bit in 
-                             zip(binary_ranks, key_stream[random_index:random_index+len(binary_ranks)]))
-        str_ranks = self._decoder_bin2str(xor_result)
+        str_ranks = self._decoder_bin2str(binary_ranks)
         ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
         self.ranks = torch.tensor(ranks_in).reshape(-1).cuda()
         self.current_pos = 0
@@ -149,6 +138,7 @@ class Rank_Decoder(LogitsProcessor):
         if self.ranks[self.current_pos] == -1:
             scores[:] = float('-inf')
             scores[:, self.lack_token] = 1e8
+            self.current_pos += 1
             return scores
         
         probs = torch.softmax(scores[-1], dim=-1)
@@ -162,7 +152,7 @@ class Rank_Decoder(LogitsProcessor):
         return modified_scores
     
 def token2binary(model, tokenizer, test_data, test_settings, output_file):
-    setup_seed(test_settings['seed'])
+    # setup_seed(test_settings['seed'])
     rank_encoder = Rank_Encoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
     if test_settings["prefix"]:
         prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])
@@ -212,7 +202,7 @@ def token2binary(model, tokenizer, test_data, test_settings, output_file):
     return sample_data
 
 def binary2token(model, tokenizer, test_data, test_settings, output_file):
-    setup_seed(test_settings['seed'])
+    # setup_seed(test_settings['seed'])
     rank_decoder = Rank_Decoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
     if test_settings["prefix"]:
         prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])

@@ -29,4 +29,4 @@ $ chmod +x run.sh
 $ nohup ./run.sh >> main_result.txt
 ```
 
-5. Wait for the run to complete. If an error occurs, it will be reported in main_result.txt. Upon successful completion, the final results will be shown in the "result" folder.
+5. Wait for the task to complete. If an error occurs, it will be reported in main_result.txt. Upon successful completion, the final results will be shown in the "result" folder.
