@@ -70,6 +70,9 @@ class SemanticCompressor:
         word_self_info = []
         current_token_idx = 0
         
+        if "deepseek" in self.model.config.name_or_path:
+            current_token_idx += 1  # Skip the first token '<｜begin▁of▁sentence｜>' for deepseek model
+        
         for word in words:
             # Tokenize the word and get its token IDs
             word_tokens = self.tokenizer.tokenize(word)
@@ -92,8 +95,8 @@ class SemanticCompressor:
             
             # Calculate the sum self-information for the word
             if word_token_self_info:
-                # word_self_info.append(np.mean(word_token_self_info))
                 word_self_info.append(np.sum(word_token_self_info))
+                # word_self_info.append(np.mean(word_token_self_info))
             else:
                 word_self_info.append(np.inf)  # If no tokens match, set self-information to inf
         

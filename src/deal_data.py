@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import random
 import jsonlines
 import numpy as np
 from tqdm import tqdm
@@ -61,50 +62,42 @@ def create_compressed_data(model, tokenizer, device, input_file, output_file, mo
     results = []
     
     with jsonlines.open(input_file) as reader:
-        for item in tqdm(reader):
-            # Perform text compression
-            start_time = time.time()
-            compressed_text, masked_words, self_info = compressor.compress_text(
-                item['content'], 
-                reduce_ratio=reduce_ratio,
-                use_unit_info=use_unit_info
-            )
-            
-            compressed_words = compressed_text.split()
-            original_words = item['content'].split()
-            
-            for i in range(len(compressed_words)):
-                if compressed_words[i] == marked_word:
-                    original_words[i] = f"[{original_words[i]}]"
-            original_text = " ".join(original_words)
-            
-            end_time = time.time()
-            
-            # compressed_tokens, masked_tokens = compressor.compress_text(
-            #     item['content'],
-            #     reduce_ratio=reduce_ratio
-            # )
-            
-            # if isinstance(masked_tokens, np.ndarray):
-            #     masked_tokens = masked_tokens.tolist()
-            # if isinstance(compressed_tokens, np.ndarray):
-            #     compressed_tokens = compressed_tokens.tolist()
-                
-            # Write the enhanced data
-            sample = {
-                "id": item['id'],
-                "content": item['content'],
-                "original_text": original_text,
-                "compressed_text": compressed_text,
-                "compress_time_cost": round(end_time - start_time, 6),
-                # "compressed_tokens": compressed_tokens,
-                "masked_words": masked_words,
-                "self_info": self_info,
-                # "masked_tokens": masked_tokens
-            }
-            if mode == 'test':
-                check_message(model, tokenizer, sample, setting)
-            results.append(sample)
+        all_data = list(reader)
+
+    if mode == 'test' and len(all_data) > setting['test_size']:
+        all_data = random.sample(all_data, setting['test_size'])
+    
+    for item in tqdm(all_data):
+        # Perform text compression
+        start_time = time.time()
+        compressed_text, masked_words, self_info = compressor.compress_text(
+            item['content'], 
+            reduce_ratio=reduce_ratio,
+            use_unit_info=use_unit_info
+        )
+        
+        compressed_words = compressed_text.split()
+        original_words = item['content'].split()
+        
+        for i in range(len(compressed_words)):
+            if compressed_words[i] == marked_word:
+                original_words[i] = f"[{original_words[i]}]"
+        original_text = " ".join(original_words)
+        
+        end_time = time.time()
+        
+        sample = {
+            "id": item['id'],
+            "content": item['content'],
+            "original_text": original_text,
+            "compressed_text": compressed_text,
+            "compress_time_cost": round(end_time - start_time, 6),
+            "masked_words": masked_words,
+            "self_info": self_info,
+        }
+        if mode == 'test':
+            check_message(model, tokenizer, sample, setting)
+        results.append(sample)
             
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=4)  

@@ -2,7 +2,7 @@ import os
 from distutils.core import setup
 from Cython.Build import cythonize
 
-setup(ext_modules=cythonize(os.path.join('stego', 'stega_cy.pyx'),
+setup(ext_modules=cythonize(os.path.join('stega', 'stega_cy.pyx'),
                             annotate=False,
                             compiler_directives={
                                 'boundscheck': False,
@@ -10,7 +10,7 @@ setup(ext_modules=cythonize(os.path.join('stego', 'stega_cy.pyx'),
                                 'language_level': 3
                             }))
 
-setup(ext_modules=cythonize(os.path.join('stego', 'random_sample_cy.pyx'),
+setup(ext_modules=cythonize(os.path.join('stega', 'random_sample_cy.pyx'),
                             annotate=False,
                             compiler_directives={
                                 'boundscheck': False,

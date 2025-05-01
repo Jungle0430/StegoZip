@@ -3,7 +3,6 @@ import random
 import torch
 import torch.nn.functional as F
 from typing import List, Tuple, Optional, Union
-from transformers import PreTrainedTokenizer, PreTrainedModel
 
 from config import Settings
 
@@ -135,7 +134,7 @@ def limit_past(past):
 
 
 @torch.no_grad()
-def get_probs_indices_past(model: PreTrainedModel,
+def get_probs_indices_past(model,
                            prev=None,
                            past=None,
                            settings: Settings = Settings(),
@@ -206,6 +205,54 @@ def check_dir(dir: str):
         os.makedirs(dir, exist_ok=True)
         print('A folder called "{}" is created.'.format(dir))
 
+def generate_binary_message(length: int, filename: str):
+    binary_bits = ''.join(random.choice('01') for _ in range(length))
+    with open(filename, 'w') as f:
+        f.write(binary_bits)
+    print(f"message_bits saved to {filename}.")
 
-if __name__ == '__main__':
-    gen_random_message(length=1000000)
+def read_binary_message(filename: str) -> str:
+    with open(filename, 'r') as f:
+        binary_bits = f.read()
+    return binary_bits
+
+def get_lower_upper_bound(cumulative_probs, v):
+    lower_bound = cumulative_probs[v-1] if v > 0 else torch.tensor(0)
+    upper_bound = cumulative_probs[v] if v < len(cumulative_probs)-1 else torch.tensor(1)
+    SE = [lower_bound.item(), upper_bound.item()]
+    return SE
+
+def func_mrn(k_m, n_m, r):
+    result = ((k_m / n_m) + r)
+    if result >= 1:
+        result = result - 1
+    return result
+
+def dec2bin(km, lm):
+    bin_str = bin(km)[2:]
+    return bin_str.zfill(lm)
+
+def get_probs_past(model,
+                   prev=None,
+                   past=None,
+                   device='cuda',
+                   top_p=1.0):
+    if past is not None:
+        past = limit_past(past)
+    model_output = model(prev, past_key_values=past)
+    past = model_output.past_key_values
+
+    logits = model_output.logits[0,-1,:].to(device)
+    logits,indices = logits.sort(descending=True)
+    logits = logits.double()
+    indices = indices.int()
+    probs = F.softmax(logits, dim=-1)
+
+    if 0 < top_p < 1.0:
+        cum_probs = probs.cumsum(0)
+        k = (cum_probs > top_p).nonzero()[0].item() + 1
+        probs = probs[:k]
+        indices = indices[:k]
+        probs = 1 / cum_probs[k - 1] * probs  # Normalizing
+    return probs, indices, past
+

@@ -18,8 +18,8 @@ def get_prefix(instruction, model_name):
     if "Qwen" in model_name:
         return f"""<|im_start|>system\n{instruction}<|im_end|>
 <|im_start|>user\n"""
-    elif "vicuna" in model_name:
-        return f"""SYSTEM: {instruction} \nUSER: """
+    elif "deepseek" in model_name:
+        return f"""System:{instruction}\n\nUser:"""
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
     
@@ -152,12 +152,11 @@ class Rank_Decoder(LogitsProcessor):
         return modified_scores
     
 def token2binary(model, tokenizer, test_data, test_settings, output_file):
-    # setup_seed(test_settings['seed'])
     rank_encoder = Rank_Encoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
     if test_settings["prefix"]:
         prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])
     else:
-        prefix = ""
+        prefix = " "
     prefix_tokens = tokenizer.encode(prefix, return_tensors="pt").to(model.device)
     
     sample_size = min(test_settings["test_size"], len(test_data))
@@ -170,6 +169,8 @@ def token2binary(model, tokenizer, test_data, test_settings, output_file):
         try:
             start_time = time.time()
             text_tokens = tokenizer.encode(data["compressed_text"])
+            if 'deepseek' in test_settings["model_name"]:
+                text_tokens = text_tokens[1:]
             rank_encoder.initialize(text_tokens)
             
             with torch.no_grad():
@@ -202,12 +203,11 @@ def token2binary(model, tokenizer, test_data, test_settings, output_file):
     return sample_data
 
 def binary2token(model, tokenizer, test_data, test_settings, output_file):
-    # setup_seed(test_settings['seed'])
     rank_decoder = Rank_Decoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
     if test_settings["prefix"]:
         prefix = get_prefix(test_settings["instruction"], test_settings["model_name"])
     else:
-        prefix = ""
+        prefix = " "
     prefix_tokens = tokenizer.encode(prefix, return_tensors="pt").to(model.device)
     prefix_pos = prefix_tokens.shape[1]
     
@@ -330,3 +330,45 @@ def huffman_zip(test_data, output_file):
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(test_data, f, ensure_ascii=False, indent=4)
+
+if __name__ == "__main__":
+    setup_seed(42)
+    
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+    # model_name = "Qwen/Qwen2.5-7B"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    rank_encoder = Rank_Encoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
+    rank_decoder = Rank_Decoder(tokenizer.eos_token_id, np.array(tokenizer.encode(" []")))
+    
+    test_data = "This is a test data for encoding and decoding."
+    prefix = get_prefix("Here is a test instruction: ", model_name)
+    prefix_tokens = tokenizer.encode(prefix, return_tensors="pt").to(model.device)
+    prefix_pos = prefix_tokens.shape[1]
+    
+    text_tokens = tokenizer.encode(test_data)[1:]
+    print(f"Text Tokens: {text_tokens}")
+    rank_encoder.initialize(text_tokens)
+            
+    with torch.no_grad():
+        outputs = model.generate(input_ids=prefix_tokens,
+                                 max_new_tokens=1024,
+                                 do_sample=False,
+                                 logits_processor=LogitsProcessorList([rank_encoder]),
+                                 early_stopping=True,
+                                 pad_token_id=tokenizer.pad_token_id)
+    ranks_str, ranks_code = rank_encoder.get_ranks()
+    
+    rank_decoder.initialize(ranks_code)
+    with torch.no_grad():
+        outputs = model.generate(input_ids=prefix_tokens,
+                                 max_new_tokens=1024,
+                                 do_sample=False,
+                                 logits_processor=LogitsProcessorList([rank_decoder]),
+                                 early_stopping=True,
+                                 pad_token_id=tokenizer.pad_token_id)
+    message_tokens = outputs[0].cpu().numpy()[prefix_pos:]
+    decoded_text = tokenizer.decode(message_tokens, skip_special_tokens=True)
+    
+    print(f"Decoded Text: {decoded_text}")

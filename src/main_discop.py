@@ -4,10 +4,10 @@ import json
 import random
 from tqdm import tqdm
 
-sys.path.append('src/stego')
+sys.path.append('src/stega')
 from model import load_model
-from stego_utils import *
-from config import Settings, text_default_settings_discop, text_default_settings_sample
+from utils import SingleExampleOutput
+from config import Settings, text_default_settings_discop
 
 def text_encode(settings: Settings, model, tokenizer, message, prompt, key):
     if settings.algo == 'sample':
@@ -55,14 +55,14 @@ def text_decode(settings: Settings, model, tokenizer, stego, prompt, key, flag=F
     
     return message_decoded
         
-def discop_stego(test_data, stego_prompt, seed, output_file):
+def discop_stego(test_data, stego_prompt, seed, output_file, temperature, use_lora=True):
     settings = text_default_settings_discop
-    settings_sample = text_default_settings_sample
+    settings.temp = temperature
 
     model, tokenizer = load_model(settings)
 
     for i, sample in tqdm(enumerate(test_data)):
-        message_binary = sample['ranks_code_True']
+        message_binary = sample[f'ranks_code_{use_lora}']
         
         random_binary = ''.join(random.choice('01') for _ in range(len(message_binary)))
         xor_result = ''.join(str(int(a) ^ int(b)) for a, b in zip(message_binary, random_binary))

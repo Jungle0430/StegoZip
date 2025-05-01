@@ -10,8 +10,8 @@ def get_prefix(instruction, model_name):
     if "Qwen" in model_name:
         return f"""<|im_start|>system\n{instruction}<|im_end|>
 <|im_start|>user\n"""
-    elif "vicuna" in model_name:
-        return f"""SYSTEM: {instruction} \nUSER: """
+    elif "deepseek" in model_name:
+        return f"""System:{instruction}\n\nUser:"""
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
     

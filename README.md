@@ -5,22 +5,23 @@ StegoZip
 1. Create folder.
 ```bash
 $ mkdir checkpoint data result
-$ cd data && mkdir compress origin
+$ cd data && mkdir compress origin && cd ..
 ```
 
-2. Download Dataset.
+2. Create environment.
 ```bash
-$ mv ../download_ag_news.py ./
-$ python download_ag_news.py && cd ..
-```
-
-3. Create environment.
-```bash
-$ conda create -n stegozip python=3.9.21
+$ conda create -n stegozip python=3.9.21 -y
 $ conda activate stegozip
 $ pip install -r requirements.txt
+$ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 $ python -m spacy download en_core_web_md
-$ cd src && python stego/setup.py build_ext --build-lib=stego/ && cd ..
+$ cd src && python stega/setup.py build_ext --build-lib=stega/ && cd ..
+```
+
+3. Download Dataset.
+```bash
+$ mv download_ag_news.py data/
+$ cd data && python download_ag_news.py && cd ..
 ```
 
 4. Run the demo script.

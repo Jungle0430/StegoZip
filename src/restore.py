@@ -15,16 +15,15 @@ def generate_prompt_qwen(instruction, input_text):
 <|im_start|>user\n{input_text}<|im_end|>
 <|im_start|>assistant\n"""
 
-def generate_prompt_vicuna(instruction, input_text):
+def generate_prompt_deepseek(instruction, input_text):
     input_text = clean_text(input_text)
-    
-    return f"""SYSTEM: {instruction}\nUSER: {input}\nASSISTANT: """
+    return f"""System:{instruction}\n\nUser:{input_text}\n\nAssistant:"""
 
 def generate_prompt(instruction, compressed_text, model_name):
     if "Qwen" in model_name:
         return generate_prompt_qwen(instruction, compressed_text)
-    elif "vicuna" in model_name:
-        return generate_prompt_vicuna(instruction, compressed_text)
+    elif "deepseek" in model_name:
+        return generate_prompt_deepseek(instruction, compressed_text)
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
 
@@ -43,7 +42,6 @@ def check_message(model, tokenizer, data, test_setting):
         outputs = model.generate(
             **inputs,
             max_new_tokens=test_setting["max_new_token"],
-            # temperature=test_setting["temperature"],
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id
         )
@@ -53,8 +51,8 @@ def check_message(model, tokenizer, data, test_setting):
     
     if "Qwen" in test_setting["model_name"]:
         response_start = full_output.find("assistant\n") + len("assistant\n")
-    elif "vicuna" in test_setting["model_name"]:
-        response_start = full_output.find("ASSISTANT: ") + len("ASSISTANT: ")
+    elif "deepseek" in test_setting["model_name"]:
+        response_start = full_output.find("Assistant:") + len("Assistant:")
     else:
         raise ValueError(f"Unsupported model name: {test_setting['model_name']}")
     
@@ -108,7 +106,6 @@ def restore_message(model, tokenizer, test_data, test_setting, output_file):
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=test_setting["max_new_token"],
-                # temperature=test_setting["temperature"],
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id
             )
@@ -118,8 +115,8 @@ def restore_message(model, tokenizer, test_data, test_setting, output_file):
         
         if "Qwen" in test_setting["model_name"]:
             response_start = full_output.find("assistant\n") + len("assistant\n")
-        elif "vicuna" in test_setting["model_name"]:
-            response_start = full_output.find("ASSISTANT: ") + len("ASSISTANT: ")
+        elif "deepseek" in test_setting["model_name"]:
+            response_start = full_output.find("Assistant:") + len("Assistant:")
         else:
             raise ValueError(f"Unsupported model name: {test_setting['model_name']}")
         

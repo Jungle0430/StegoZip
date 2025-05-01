@@ -17,11 +17,11 @@ def generate_prompt_qwen(instruction, input_text, output_text, end_marker="[END]
 <|im_start|>user\n{input_text}<|im_end|>
 <|im_start|>assistant\n{output_text}{end_marker}<|im_end|>"""
 
-def generate_prompt_vicuna(instruction, input_text, output_text, end_marker="[END]"):
+def generate_prompt_deepseek(instruction, input_text, output_text, end_marker="[END]"):
     input_text = clean_text(input_text)
     output_text = clean_text(output_text)
     
-    return f"""SYSTEM: {instruction}\nUSER: {input_text}\nASSISTANT: {output_text}{end_marker}"""
+    return f"""System:{instruction}\n\nUser:{input_text}\n\nAssistant:{output_text}{end_marker}"""
 
 def tokenize(prompt, tokenizer, cutoff_len=512, response_start_pos=0, add_eos_token=True):
     result = tokenizer(
@@ -56,12 +56,12 @@ def generate_and_tokenize_prompt(tokenizer, data_point, train_settings):
         tokenized_prompt = tokenizer(prompt_without_response, add_special_tokens=False)
         response_start_pos = len(tokenized_prompt["input_ids"])
         
-    elif "vicuna" in train_settings['model_name']:
-        full_prompt = generate_prompt_vicuna(train_settings['instruction'],
-                                              data_point["compressed_text"],
-                                              data_point["original_text"],
-                                              train_settings['end_marker'])
-        prompt_without_response = full_prompt.split("ASSISTANT: ")[0] + "ASSISTANT: "
+    elif "deepseek" in train_settings['model_name']:
+        full_prompt = generate_prompt_deepseek(train_settings['instruction'],
+                                               data_point["compressed_text"],
+                                               data_point["original_text"],
+                                               train_settings['end_marker'])
+        prompt_without_response = full_prompt.split("Assistant:")[0] + "Assistant:"
         tokenized_prompt = tokenizer(prompt_without_response, add_special_tokens=False)
         response_start_pos = len(tokenized_prompt["input_ids"])
         
@@ -78,11 +78,11 @@ def finetune_model(base_model,
                    output_dir,
                    train_settings,
                    use_wandb=True):
-    if use_wandb:
-        wandb.init(project="stegozip", name=f"{train_settings['model_name']}_finetune", config=train_settings)
-    
     if os.path.exists(output_dir):
         raise FileExistsError(f"Output directory {output_dir} already exists! \nIf you want to refinetune the model, please delete the directory first!")
+    
+    if use_wandb:
+        wandb.init(project="stegozip", name=f"{train_settings['model_name']}_finetune", config=train_settings)
     
     model = prepare_model_for_kbit_training(base_model)
     """Fine-tune a language model on text restoration task"""

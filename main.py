@@ -11,6 +11,7 @@ from src.deal_data import download_dataset, create_compressed_data
 from src.finetune import finetune_model
 from src.rank_zip import token2binary, binary2token, huffman_zip
 from src.main_discop import discop_stego
+from src.main_sparsamp import sparsamp_stego
 from src.restore import restore_message
 from src.evaluation import evaluation
 from peft import PeftModel
@@ -33,9 +34,9 @@ def main():
     parser.add_argument("--mode", type=str, default="test", choices=["train", "test", "stego", "eval"])
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B")
     parser.add_argument("--dataset", type=str, default="ag_news")
-    parser.add_argument("--domain", type=str, default="business", choices=["world", "sports", "business", "tech", "comment"])
-    parser.add_argument("--temperature", type=float, default=0.3)
-    parser.add_argument("--reduce_ratio", type=float, default=0.3)
+    parser.add_argument("--domain", type=str, default="business", choices=["world", "sports", "business", "tech", "full"])
+    parser.add_argument("--temperature", type=float, default=0.9)
+    parser.add_argument("--reduce_ratio", type=float, default=0.35)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use_unit_info", type=str2bool, default=True)
@@ -88,8 +89,15 @@ def main():
             trust_remote_code=True
         )
         tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True)
-        # <unk> token tokenizer.convert_ids_to_tokens(128244)
-        tokenizer.pad_token = "<unk>"
+        #TODO When switching models, this type of conditional statement may lead to ambiguity.
+        if "deepseek" in args.model_name:
+            tokenizer.pad_token_id = 128004
+            tokenizer.pad_token = "<|finetune_right_pad_id|>"
+        elif "Qwen" in args.model_name:
+            tokenizer.pad_token_id = 128244
+            tokenizer.pad_token = "<unk>"
+        else:
+            raise ValueError(f"Unsupported model: {args.model_name}")
         
         train_settings = {
             "model_name": args.model_name,
@@ -117,8 +125,14 @@ def main():
     elif args.mode == 'test':
         base_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32, device_map="auto")
         tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-        tokenizer.pad_token_id = 128244
-        tokenizer.pad_token = "<unk>"
+        if "deepseek" in args.model_name:
+            tokenizer.pad_token_id = 128004
+            tokenizer.pad_token = "<|finetune_right_pad_id|>"
+        elif "Qwen" in args.model_name:
+            tokenizer.pad_token_id = 128244
+            tokenizer.pad_token = "<unk>"
+        else:
+            raise ValueError(f"Unsupported model: {args.model_name}")
         
         if os.path.exists(lora_path):
             model = PeftModel.from_pretrained(base_model, lora_path)
@@ -141,7 +155,6 @@ def main():
             "end_marker": args.end_marker,
             "max_new_token": args.cutoff_len,
             "test_size": args.test_size,
-            "temperature": args.temperature,
             "prefix": args.prefix,
             "max_new_tokens": args.max_new_tokens,
             "use_lora": args.use_lora,
@@ -159,7 +172,8 @@ def main():
                                device,
                                dataset_path,
                                compressed_dataset_path,
-                               args.mode,
+                               mode=args.mode,
+                               setting=train_settings,
                                ave_info=ave_info,
                                reduce_ratio=args.reduce_ratio,
                                eta=args.eta,
@@ -255,7 +269,9 @@ def main():
         
         stego_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
         if args.stego_algo == 'Discop':
-            discop_stego(test_dataset, stego_prompt, args.seed, stego_file)
+            discop_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
+        elif args.stego_algo == 'SparSamp':
+            sparsamp_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
         else:
             print("As a proven master of steganography, I'm sure you can make it on your own! (๑•̀ㅂ•́)و✧")
             raise ValueError(f"Invalid stego algorithm: {args.stego_algo}")     
