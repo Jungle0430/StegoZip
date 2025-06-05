@@ -249,7 +249,7 @@ def binary2token(model, tokenizer, test_data, test_settings, output_file):
     
     return sample_data
         
-def huffman_zip(test_data, output_file):
+def huffman_zip(test_data, tokenizer, output_file):
     from argparse import Namespace
     import heapq
     import random
@@ -316,8 +316,8 @@ def huffman_zip(test_data, output_file):
                 node = tree
         return decoded_text
     
-    compressed_text_data = [sample['compressed_text'] for sample in test_data]
-    original_text_data = [sample['original_text'] for sample in test_data]
+    compressed_text_data = [tokenizer(sample['compressed_text'])['input_ids'] for sample in test_data]
+    original_text_data = [tokenizer(sample['original_text'])['input_ids'] for sample in test_data]
     
     tree1, code_table1 = build_global_huffman(compressed_text_data)
     tree2, code_table2 = build_global_huffman(original_text_data)

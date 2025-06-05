@@ -108,7 +108,7 @@ class SemanticCompressor:
         
         Args:
             text: The input text.
-            reduce_ratio: The ratio of content to be removed (e.g., 0.35 means 35% of content will be removed).
+            reduce_ratio: The ratio of content to be removed (e.g., 0.35 means 35% of semantic content will be removed).
         
         Returns:
             compressed_text: The compressed text.

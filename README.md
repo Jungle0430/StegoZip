@@ -1,7 +1,10 @@
 # StegoZip
 StegoZip
 
-## How to run (a demo).
+## Overview
+
+
+## Usage.
 1. Create folder.
 ```bash
 $ mkdir checkpoint data result
@@ -30,4 +33,9 @@ $ chmod +x run.sh
 $ nohup ./run.sh >> main_result.txt
 ```
 
-5. Wait for the task to complete. If an error occurs, it will be reported in main_result.txt. Upon successful completion, the final results will be shown in the "result" folder.
+5. Wait for the task to complete. If any error occurs during the process, it will be reported in the `main_result.txt` file. Upon successful completion, the final results will be displayed in the `result/` folder.
+
+## Acknowledgment
+
+## Citation
+If you find this work or repository useful, please consider citing or starring it.

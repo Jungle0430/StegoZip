@@ -31,18 +31,18 @@ def str2bool(v):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, default="test", choices=["train", "test", "stego", "eval"])
+    parser.add_argument("--mode", type=str, default="test", choices=["train", "test", "eval"])
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B")
     parser.add_argument("--dataset", type=str, default="ag_news")
     parser.add_argument("--domain", type=str, default="business", choices=["world", "sports", "business", "tech", "full"])
     parser.add_argument("--temperature", type=float, default=0.9)
-    parser.add_argument("--reduce_ratio", type=float, default=0.35)
+    parser.add_argument("--reduce_ratio", type=float, default=0.4)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use_unit_info", type=str2bool, default=True)
     parser.add_argument("--use_lora", type=str2bool, default=True)
     parser.add_argument("--whether_restore", type=str2bool, default=True)
-    parser.add_argument("--base_zip", type=str2bool, default=True)
+    parser.add_argument("--base_zip", type=str2bool, default=False)
 
     parser.add_argument("--instruction", type=str,
                         default="You are a text restoration specialist. Your task is to ONLY fill in the missing content within square brackets [] in the input text. Requirements:\n1. Strictly preserve all existing text and punctuation outside brackets.\n2. Maintain original text structure and formatting.")
@@ -51,8 +51,8 @@ def main():
     parser.add_argument("--stable_ratio", type=float, default=0.1)
     parser.add_argument("--val_ratio", type=float, default=0.2)
     parser.add_argument("--cutoff_len", type=int, default=256)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--micro_batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--micro_batch_size", type=int, default=16)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--learning_rate", type=float, default=3e-5)
@@ -67,9 +67,9 @@ def main():
     
     parser.add_argument("--test_size", type=int, default=2000)
     parser.add_argument("--prefix", type=str2bool, default=True)
-    parser.add_argument("--max_new_tokens", type=int, default=1024)
+    parser.add_argument("--max_new_tokens", type=int, default=512)
     
-    parser.add_argument("--stego_algo", type=str, default="Discop", choices=["ADG", "Meteor", "Discop", "SparSamp"])
+    parser.add_argument("--stego_algo", type=str, default="Discop", choices=["Discop", "SparSamp"])
     parser.add_argument("--stego_dataset", type=str, default="wikitext")
     
     args = parser.parse_args()
@@ -123,6 +123,7 @@ def main():
         args.eta = 0.0
         
     elif args.mode == 'test':
+        # Float16 may result in decoding failure.
         base_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32, device_map="auto")
         tokenizer = AutoTokenizer.from_pretrained(args.model_name)
         if "deepseek" in args.model_name:
@@ -239,24 +240,15 @@ def main():
             del model, base_model
             torch.cuda.empty_cache()
             model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32, device_map="auto")
-            test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
-            test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, results_file)
-        else:
-            test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
-            test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, results_file)
+        test_dataset = token2binary(model, tokenizer, test_dataset, test_settings, results_file)
             
         if args.base_zip:
-            huffman_zip(test_dataset, results_file)
+            huffman_zip(test_dataset, tokenizer, results_file)
 
-    elif args.mode == 'stego':
         stego_dataset_path = f"data/origin/{args.stego_dataset}_train.jsonl"
         download_dataset(args.stego_dataset, 'train', output_file=stego_dataset_path)
         with jsonlines.open(stego_dataset_path) as reader:
             stego_dataset = [item for item in reader]
-        
-        results_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}.json"
-        with open(results_file, "r") as f:
-            test_dataset = json.load(f)
             
         random_indices = random.sample(range(len(stego_dataset)), len(test_dataset))
         selected_texts = [stego_dataset[i]['content'] for i in random_indices]
@@ -269,12 +261,14 @@ def main():
         
         stego_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
         if args.stego_algo == 'Discop':
-            discop_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
+            test_dataset = discop_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
         elif args.stego_algo == 'SparSamp':
-            sparsamp_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
+            test_dataset = sparsamp_stego(test_dataset, stego_prompt, args.seed, stego_file, args.temperature, args.use_lora)
         else:
             print("As a proven master of steganography, I'm sure you can make it on your own! (๑•̀ㅂ•́)و✧")
-            raise ValueError(f"Invalid stego algorithm: {args.stego_algo}")     
+            raise ValueError(f"Invalid stego algorithm: {args.stego_algo}")
+        
+        test_dataset = binary2token(model, tokenizer, test_dataset, test_settings, stego_file)   
         
     elif args.mode == 'eval':
         stego_file = f"result/{args.model_name.split('/')[1]}_{args.dataset}_{args.domain}_{int(args.reduce_ratio*100)}_{int(args.eta*100)}_stego.json"
