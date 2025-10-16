@@ -5,7 +5,7 @@ import time
 import torch.nn.functional as F
 import sentencepiece as spm
 # import pairing
-from p_sp_utils import pairing
+from src.p_sp_utils import pairing
 # import utils
 from torch.nn.modules.distance import CosineSimilarity
 from torch.nn.utils.rnn import pad_packed_sequence as unpack

@@ -60,6 +60,15 @@ text_default_settings_discop = Settings('text',
                                         batched_encode=False,
                                         with_context_start=False)
 
+text_default_settings_sparsamp = Settings('text',
+                                        model_name='LLaMA-7B',
+                                        algo='SparSamp',
+                                        top_p=1.0,
+                                        length=1000,
+                                        win_len=511,
+                                        batched_encode=False,
+                                        with_context_start=False)
+
 text_default_settings_meteor = Settings('text',
                                         model_name='LLaMA-7B',
                                         algo='Meteor',

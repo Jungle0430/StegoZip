@@ -16,4 +16,9 @@ spacy==3.8.3
 tqdm
 transformers==4.46.0
 wandb==0.19.0
-
+datasets
+jsonlines
+fairscale
+bert_score
+sacremoses
+bitsandbytes

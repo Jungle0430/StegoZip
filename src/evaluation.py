@@ -81,7 +81,7 @@ class PSPCalculator:
                 print("Downloading pretrained models...")
                 os.makedirs('src/p_sp_utils', exist_ok=True)
                 subprocess.run(['wget', 'http://www.cs.cmu.edu/~jwieting/paraphrase-at-scale-english.zip'])
-                subprocess.run(['unzip', 'paraphrase-at-scale-english.zip', '-d', './p_sp_utils'])
+                subprocess.run(['unzip', 'paraphrase-at-scale-english.zip', '-d', 'src/p_sp_utils'])
                 os.remove('paraphrase-at-scale-english.zip')
 
         model, _ = load_model(None, args)

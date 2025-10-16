@@ -323,11 +323,11 @@ def huffman_zip(test_data, tokenizer, output_file):
     tree2, code_table2 = build_global_huffman(original_text_data)
     
     for sample in test_data:
-        sample['base_compressed_code'] = huffman_encode(sample['compressed_text'], code_table1)
-        sample['base_original_code'] = huffman_encode(sample['original_text'], code_table2)
-        
-    print(f"=================== Base Eecoding Complete ===================")
-    
+        sample['base_compressed_code'] = huffman_encode(tokenizer(sample['compressed_text'])['input_ids'], code_table1)
+        sample['base_original_code'] = huffman_encode(tokenizer(sample['original_text'])['input_ids'], code_table2)
+
+    print(f"=================== Base Encoding Complete ===================")
+
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(test_data, f, ensure_ascii=False, indent=4)
 
