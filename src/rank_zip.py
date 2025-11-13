@@ -4,6 +4,7 @@ import torch
 import random
 import numpy as np
 from tqdm import tqdm
+from src.arithmeticcoding import *
 from typing import List, Tuple, Any, Optional
 from transformers import LogitsProcessor, LogitsProcessorList
 
@@ -44,7 +45,9 @@ class Rank_Encoder(LogitsProcessor):
             str_out += (str(array_used[i]) if array_used[i] != -1 else '') + ' '
         return str_out[:-1]
     
-    def _encoder_str2bin(self, string_data):
+    # After conducting extensive data analysis, 
+    # a more effective cipher book can be formed with better compression performance.
+    def _encoder_str2bin_1(self, string_data):
         encoding_map = {
             '0': '101', '1': '0001', '2': '0010', '3': '0011',
             '4': '0100', '5': '0101', '6': '0110', '7': '0111',
@@ -61,7 +64,7 @@ class Rank_Encoder(LogitsProcessor):
         ranks_full = np.concatenate(self.ranks_list, 0).squeeze()
 
         str_ranks = self._get_str_array(ranks_full)
-        ranks_code = self._encoder_str2bin(str_ranks)
+        ranks_code = self._encoder_str2bin_1(str_ranks)
 
         return str_ranks, ranks_code
     
@@ -92,12 +95,12 @@ class Rank_Decoder(LogitsProcessor):
         
     def initialize(self,
                    binary_ranks: str):
-        str_ranks = self._decoder_bin2str(binary_ranks)
+        str_ranks = self._decoder_bin2str_1(binary_ranks)
         ranks_in = np.fromstring(str_ranks, sep=' ', dtype=np.int64)
         self.ranks = torch.tensor(ranks_in).reshape(-1).cuda()
         self.current_pos = 0
         
-    def _decoder_bin2str(self, binary_string):
+    def _decoder_bin2str_1(self, binary_string):
         decoding_map = {
             '0001': '1', '0010': '2', '0011': '3', '0100': '4',
             '0101': '5', '0110': '6', '0111': '7', '1000': '8',

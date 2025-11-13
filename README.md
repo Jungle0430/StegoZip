@@ -2,12 +2,12 @@
 
 ![author](fig/author.png)
 
-This repository hosts the official PyTorch implementation of the paper: "StegoZip: Enhancing Linguistic Steganography Payload in Practice with Large Language Models" (Accepted by Neurips 2025).
+This repository hosts the official PyTorch implementation of the paper: "[StegoZip: Enhancing Linguistic Steganography Payload in Practice with Large Language Models](https://openreview.net/forum?id=JJ29N4MklH)" (Accepted by Neurips 2025).
 
 ## Overview.
 ![method](fig/framework.png)
 
-Abstract: Generative steganography has emerged as an active research area, yet its practical system is constrained by the inherent secret payload limitation caused by low entropy in generating stego texts. This payload limitation necessitates the use of lengthy stego texts or frequent transmissions, which increases the risk of suspicion by adversaries. Previous studies have mainly focused on payload enhancement through optimized entropy utilization while overlooking the crucial role of secret message processing. To address this gap, we propose \textit{StegoZip}, a framework that leverages large language models to optimize secret message processing. StegoZip consists of two core components: semantic redundancy pruning and index-based compression coding. The former dynamically prunes the secret message to extract a low-semantic representation, whereas the latter further compresses it into compact binary codes. When integrated with state-of-the-art steganographic methods under lossless decoding, StegoZip achieves 2.5\(\times\) the payload of the baselines while maintaining comparable processing time in practice. This enhanced payload significantly improves covertness by mitigating the risks associated with frequent transmissions while maintaining provable content security.
+Abstract: Generative steganography has emerged as an active research area, yet its practical system is constrained by the inherent secret payload limitation caused by low entropy in generating stego texts. This payload limitation necessitates the use of lengthy stego texts or frequent transmissions, which increases the risk of suspicion by adversaries. Previous studies have mainly focused on payload enhancement through optimized entropy utilization while overlooking the crucial role of secret message processing. To address this gap, we propose StegoZip, a framework that leverages large language models to optimize secret message processing. StegoZip consists of two core components: semantic redundancy pruning and index-based compression coding. The former dynamically prunes the secret message to extract a low-semantic representation, whereas the latter further compresses it into compact binary codes. When integrated with state-of-the-art steganographic methods under lossless decoding, StegoZip achieves 2.5$\times$ the payload of the baselines while maintaining comparable processing time in practice. This enhanced payload significantly improves covertness by mitigating the risks associated with frequent transmissions while maintaining provable content security.
 
 ## Getting Started.
 1. Create folder.
@@ -45,3 +45,10 @@ We heavily borrow the code from [Discop](https://github.com/comydream/Discop) an
 
 ## Citation
 If you find this work or repository useful, please consider citing or starring it.
+```
+@inproceedings{jiangstegozip,
+  title={StegoZip: Enhancing Linguistic Steganography Payload in Practice with Large Language Models},
+  author={Jiang, Jun and Yang, Zijin and Zhang, Weiming and Yu, Nenghai and Chen, Kejiang},
+  booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems}
+}
+```
