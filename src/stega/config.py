@@ -19,8 +19,8 @@ class Settings:
                  output_path = '../text_output',
                  device=torch.device('cuda')):
 
-        if task not in ['text', 'image', 'text-to-speech']:
-            raise NotImplementedError("`Settings.task` must belong to {'text', 'image', 'text-to-speech'}!")
+        if task not in ['text']:
+            raise NotImplementedError("`Settings.task` must belong to {'text'}!")
         self.task = task
         self.algo = algo
         self.model_name = model_name

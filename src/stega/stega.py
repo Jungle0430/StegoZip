@@ -6,7 +6,6 @@ from math import log2
 from typing import List, Dict, Optional, Union
 
 from config import Settings
-from model import load_model
 from huffman import create_huffman_tree
 from utils import get_probs_indices_past, SingleExampleOutput, SingleEncodeStepOutput, SingleDecodeStepOutput, set_seed
 
